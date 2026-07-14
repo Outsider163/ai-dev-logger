@@ -37,6 +37,15 @@ type CreateNoteInput struct {
 	Summary string
 }
 
+type UpdateNoteInput struct {
+	ID          int64
+	Title       *string
+	Body        *string
+	Tags        []string
+	ReplaceTags bool
+	Summary     *string
+}
+
 func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -143,6 +152,71 @@ WHERE id = ?
 	}
 
 	return note, nil
+}
+
+func (s *Store) UpdateNote(ctx context.Context, input UpdateNoteInput) (Note, error) {
+	note, err := s.GetNote(ctx, input.ID)
+	if err != nil {
+		return Note{}, err
+	}
+
+	if input.Title != nil {
+		note.Title = *input.Title
+	}
+	if input.Body != nil {
+		note.Body = *input.Body
+	}
+	if input.ReplaceTags {
+		note.Tags = input.Tags
+	}
+	if input.Summary != nil {
+		note.Summary = *input.Summary
+	}
+	note.UpdatedAt = time.Now().UTC()
+
+	tagsJSON, err := json.Marshal(note.Tags)
+	if err != nil {
+		return Note{}, err
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+UPDATE notes
+SET title = ?, body = ?, tags_json = ?, summary = ?, updated_at = ?
+WHERE id = ?
+`, note.Title, note.Body, string(tagsJSON), note.Summary, formatTime(note.UpdatedAt), note.ID)
+	if err != nil {
+		return Note{}, err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return Note{}, err
+	}
+	if affected == 0 {
+		return Note{}, ErrNoteNotFound
+	}
+
+	return note, nil
+}
+
+func (s *Store) DeleteNote(ctx context.Context, id int64) error {
+	result, err := s.db.ExecContext(ctx, `
+DELETE FROM notes
+WHERE id = ?
+`, id)
+	if err != nil {
+		return err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrNoteNotFound
+	}
+
+	return nil
 }
 
 func (s *Store) SearchNotes(ctx context.Context, query string, limit int) ([]Note, error) {

@@ -11,9 +11,11 @@ import (
 var dbPath string
 
 var rootCmd = &cobra.Command{
-	Use:   "ai-dev-logger",
-	Short: "AI 开发日志助手",
-	Long:  "ai-dev-logger 是一个面向程序员本地使用的开发笔记 CLI。",
+	Use:           "ai-dev-logger",
+	Short:         "AI development note CLI",
+	Long:          "ai-dev-logger is a local CLI for collecting and searching development notes.",
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 func Execute() {
@@ -27,8 +29,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", defaultDBPath(), "SQLite database path")
 
 	rootCmd.AddCommand(addCmd)
+	rootCmd.AddCommand(deleteCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(showCmd)
+	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(searchCmd)
 }
 
