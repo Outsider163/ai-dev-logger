@@ -1,6 +1,8 @@
 package cli
 
 import (
+	appconfig "ai-dev-logger/internal/config"
+
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 )
 
 var dbPath string
+var configPath string
 
 var rootCmd = &cobra.Command{
 	Use:           "ai-dev-logger",
@@ -27,8 +30,10 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", defaultDBPath(), "SQLite database path")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", appconfig.DefaultPath(), "Config file path")
 
 	rootCmd.AddCommand(addCmd)
+	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(deleteCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(showCmd)

@@ -32,6 +32,14 @@ go run . search "map"
 go run . delete 1 --yes
 ```
 
+配置 LLM 相关信息：
+
+```bash
+go run . config path
+go run . config set --api-key "your-api-key" --model "your-chat-model" --embedding-model "your-embedding-model"
+go run . config show
+```
+
 如果正文较长，可以从标准输入录入：
 
 ```bash
