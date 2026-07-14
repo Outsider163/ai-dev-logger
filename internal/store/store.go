@@ -1,0 +1,201 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	_ "modernc.org/sqlite"
+)
+
+type Store struct {
+	db *sql.DB
+}
+
+type Note struct {
+	ID        int64
+	Title     string
+	Body      string
+	Tags      []string
+	Summary   string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type CreateNoteInput struct {
+	Title   string
+	Body    string
+	Tags    []string
+	Summary string
+}
+
+func Open(path string) (*Store, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, err
+	}
+
+	store := &Store{db: db}
+	if err := store.migrate(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	return store, nil
+}
+
+func (s *Store) Close() error {
+	return s.db.Close()
+}
+
+func (s *Store) migrate(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS notes (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	title TEXT NOT NULL,
+	body TEXT NOT NULL,
+	tags_json TEXT NOT NULL DEFAULT '[]',
+	summary TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at);
+`)
+	return err
+}
+
+func (s *Store) CreateNote(ctx context.Context, input CreateNoteInput) (Note, error) {
+	now := time.Now().UTC()
+	tagsJSON, err := json.Marshal(input.Tags)
+	if err != nil {
+		return Note{}, err
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+INSERT INTO notes (title, body, tags_json, summary, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+`, input.Title, input.Body, string(tagsJSON), input.Summary, formatTime(now), formatTime(now))
+	if err != nil {
+		return Note{}, err
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return Note{}, err
+	}
+
+	return Note{
+		ID:        id,
+		Title:     input.Title,
+		Body:      input.Body,
+		Tags:      input.Tags,
+		Summary:   input.Summary,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, nil
+}
+
+func (s *Store) ListNotes(ctx context.Context, limit int) ([]Note, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, title, body, tags_json, summary, created_at, updated_at
+FROM notes
+ORDER BY created_at DESC
+LIMIT ?
+`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanNotes(rows)
+}
+
+func (s *Store) SearchNotes(ctx context.Context, query string, limit int) ([]Note, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	likeQuery := "%" + escapeLike(query) + "%"
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, title, body, tags_json, summary, created_at, updated_at
+FROM notes
+WHERE title LIKE ? ESCAPE '\'
+	OR body LIKE ? ESCAPE '\'
+	OR tags_json LIKE ? ESCAPE '\'
+ORDER BY created_at DESC
+LIMIT ?
+`, likeQuery, likeQuery, likeQuery, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanNotes(rows)
+}
+
+func scanNotes(rows *sql.Rows) ([]Note, error) {
+	var notes []Note
+	for rows.Next() {
+		var note Note
+		var tagsJSON string
+		var createdAt string
+		var updatedAt string
+
+		if err := rows.Scan(
+			&note.ID,
+			&note.Title,
+			&note.Body,
+			&tagsJSON,
+			&note.Summary,
+			&createdAt,
+			&updatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		if err := json.Unmarshal([]byte(tagsJSON), &note.Tags); err != nil {
+			return nil, fmt.Errorf("decode tags for note %d: %w", note.ID, err)
+		}
+
+		var err error
+		note.CreatedAt, err = parseTime(createdAt)
+		if err != nil {
+			return nil, err
+		}
+		note.UpdatedAt, err = parseTime(updatedAt)
+		if err != nil {
+			return nil, err
+		}
+
+		notes = append(notes, note)
+	}
+
+	return notes, rows.Err()
+}
+
+func formatTime(t time.Time) string {
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+func parseTime(value string) (time.Time, error) {
+	return time.Parse(time.RFC3339Nano, value)
+}
+
+func escapeLike(value string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(value)
+}
