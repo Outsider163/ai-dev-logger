@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,8 @@ import (
 type Store struct {
 	db *sql.DB
 }
+
+var ErrNoteNotFound = errors.New("note not found")
 
 type Note struct {
 	ID        int64
@@ -124,6 +127,24 @@ LIMIT ?
 	return scanNotes(rows)
 }
 
+func (s *Store) GetNote(ctx context.Context, id int64) (Note, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, title, body, tags_json, summary, created_at, updated_at
+FROM notes
+WHERE id = ?
+`, id)
+
+	note, err := scanNote(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Note{}, ErrNoteNotFound
+	}
+	if err != nil {
+		return Note{}, err
+	}
+
+	return note, nil
+}
+
 func (s *Store) SearchNotes(ctx context.Context, query string, limit int) ([]Note, error) {
 	if limit <= 0 {
 		limit = 10
@@ -147,36 +168,49 @@ LIMIT ?
 	return scanNotes(rows)
 }
 
+type noteScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanNote(scanner noteScanner) (Note, error) {
+	var note Note
+	var tagsJSON string
+	var createdAt string
+	var updatedAt string
+
+	if err := scanner.Scan(
+		&note.ID,
+		&note.Title,
+		&note.Body,
+		&tagsJSON,
+		&note.Summary,
+		&createdAt,
+		&updatedAt,
+	); err != nil {
+		return Note{}, err
+	}
+
+	if err := json.Unmarshal([]byte(tagsJSON), &note.Tags); err != nil {
+		return Note{}, fmt.Errorf("decode tags for note %d: %w", note.ID, err)
+	}
+
+	var err error
+	note.CreatedAt, err = parseTime(createdAt)
+	if err != nil {
+		return Note{}, err
+	}
+	note.UpdatedAt, err = parseTime(updatedAt)
+	if err != nil {
+		return Note{}, err
+	}
+
+	return note, nil
+}
+
 func scanNotes(rows *sql.Rows) ([]Note, error) {
 	var notes []Note
 	for rows.Next() {
-		var note Note
-		var tagsJSON string
-		var createdAt string
-		var updatedAt string
-
-		if err := rows.Scan(
-			&note.ID,
-			&note.Title,
-			&note.Body,
-			&tagsJSON,
-			&note.Summary,
-			&createdAt,
-			&updatedAt,
-		); err != nil {
-			return nil, err
-		}
-
-		if err := json.Unmarshal([]byte(tagsJSON), &note.Tags); err != nil {
-			return nil, fmt.Errorf("decode tags for note %d: %w", note.ID, err)
-		}
-
-		var err error
-		note.CreatedAt, err = parseTime(createdAt)
-		if err != nil {
-			return nil, err
-		}
-		note.UpdatedAt, err = parseTime(updatedAt)
+		note, err := scanNote(rows)
 		if err != nil {
 			return nil, err
 		}
