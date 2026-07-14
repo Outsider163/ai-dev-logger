@@ -1,4 +1,5 @@
 .env
+.gocache/
 *.db
 *.db-shm
 *.db-wal

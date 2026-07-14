@@ -26,6 +26,7 @@ go mod tidy
 ```bash
 go run . add --title "Go map 踩坑" --tag go --tag bug --body "map 并发读写会 panic"
 go run . list
+go run . show 1
 go run . search "map"
 ```
 
@@ -48,6 +49,5 @@ go func() { _ = m["x"] }()
 ## 下一步
 
 1. 接入 LLM API：生成 `summary` 和推荐标签。
-2. 增加 `show <id>` 命令：查看完整笔记和代码块。
-3. 接入 embedding：把笔记内容转成向量。
-4. 接入 sqlite-vss：实现真正的语义检索。
+2. 接入 embedding：把笔记内容转成向量。
+3. 接入 sqlite-vss：实现真正的语义检索。
