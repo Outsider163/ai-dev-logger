@@ -27,7 +27,9 @@ go mod tidy
 go run . add --title "Go map 踩坑" --tag go --tag bug --body "map 并发读写会 panic"
 go run . list
 go run . show 1
+go run . update 1 --title "Go map 并发读写问题" --tag go --tag concurrency
 go run . search "map"
+go run . delete 1 --yes
 ```
 
 如果正文较长，可以从标准输入录入：
