@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	appconfig "ai-dev-logger/internal/config"
+	"ai-dev-logger/internal/llm"
 	"ai-dev-logger/internal/store"
 
 	"github.com/spf13/cobra"
@@ -14,14 +16,15 @@ import (
 var addTitle string
 var addBody string
 var addTags []string
+var addAI bool
 
 var addCmd = &cobra.Command{
 	Use:   "add",
-	Short: "添加一条开发笔记",
+	Short: "Add a development note",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		title := strings.TrimSpace(addTitle)
 		if title == "" {
-			return fmt.Errorf("title is required, example: ai-dev-logger add --title \"Go map 踩坑\"")
+			return fmt.Errorf("title is required, example: ai-dev-logger add --title \"Go map issue\"")
 		}
 
 		body, err := readBody()
@@ -32,6 +35,34 @@ var addCmd = &cobra.Command{
 			return fmt.Errorf("body is required, pass --body or pipe content from stdin")
 		}
 
+		tags := cleanTags(addTags)
+		summary := ""
+
+		if addAI {
+			cfg, err := appconfig.Load(configPath)
+			if err != nil {
+				return err
+			}
+
+			enhanced, err := llm.NewClient(cfg.LLM).EnhanceNote(cmd.Context(), llm.EnhanceNoteInput{
+				Title: title,
+				Body:  body,
+				Tags:  tags,
+			})
+			if err != nil {
+				return fmt.Errorf("ai enhance note: %w", err)
+			}
+
+			if enhanced.Title != "" {
+				title = enhanced.Title
+			}
+			if enhanced.Body != "" {
+				body = enhanced.Body
+			}
+			summary = enhanced.Summary
+			tags = cleanTags(append(tags, enhanced.Tags...))
+		}
+
 		db, err := store.Open(dbPath)
 		if err != nil {
 			return err
@@ -39,9 +70,10 @@ var addCmd = &cobra.Command{
 		defer db.Close()
 
 		note, err := db.CreateNote(cmd.Context(), store.CreateNoteInput{
-			Title: title,
-			Body:  body,
-			Tags:  cleanTags(addTags),
+			Title:   title,
+			Body:    body,
+			Tags:    tags,
+			Summary: summary,
 		})
 		if err != nil {
 			return err
@@ -56,6 +88,7 @@ func init() {
 	addCmd.Flags().StringVarP(&addTitle, "title", "t", "", "Note title")
 	addCmd.Flags().StringVarP(&addBody, "body", "b", "", "Note body, Markdown is supported")
 	addCmd.Flags().StringArrayVar(&addTags, "tag", nil, "Tag, can be used multiple times")
+	addCmd.Flags().BoolVar(&addAI, "ai", false, "Use LLM to polish body, summarize, and generate tags")
 }
 
 func readBody() (string, error) {

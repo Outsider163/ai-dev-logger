@@ -40,6 +40,14 @@ go run . config set --api-key "your-api-key" --model "your-chat-model" --embeddi
 go run . config show
 ```
 
+使用 AI 增强笔记：
+
+```bash
+go run . add --ai --title "Go map issue" --tag go --body "map concurrent read write panic, use mutex or sync.Map"
+```
+
+`--ai` 会读取 `config` 里的 LLM 配置，调用兼容 OpenAI `/chat/completions` 的接口，自动优化正文、生成摘要和补充标签。
+
 如果正文较长，可以从标准输入录入：
 
 ```bash
