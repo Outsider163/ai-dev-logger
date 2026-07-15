@@ -138,3 +138,83 @@ func TestListEmbeddingsByModel(t *testing.T) {
 		t.Fatalf("expected 2 embeddings, got %d", len(embeddings))
 	}
 }
+
+func TestUpdateNoteDeletesStaleEmbeddings(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	note, err := db.CreateNote(ctx, CreateNoteInput{Title: "Old", Body: "old body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpsertEmbedding(ctx, UpsertEmbeddingInput{NoteID: note.ID, Model: "model-a", Text: note.Body, Vector: []float64{0.1}}); err != nil {
+		t.Fatal(err)
+	}
+
+	updatedBody := "new body"
+	if _, err := db.UpdateNote(ctx, UpdateNoteInput{ID: note.ID, Body: &updatedBody}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.GetEmbedding(ctx, note.ID, "model-a"); !errors.Is(err, ErrEmbeddingNotFound) {
+		t.Fatalf("expected stale embedding to be deleted, got %v", err)
+	}
+}
+
+func TestDeleteNoteDeletesEmbeddings(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	note, err := db.CreateNote(ctx, CreateNoteInput{Title: "Delete", Body: "body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpsertEmbedding(ctx, UpsertEmbeddingInput{NoteID: note.ID, Model: "model-a", Text: note.Body, Vector: []float64{0.1}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteNote(ctx, note.ID); err != nil {
+		t.Fatal(err)
+	}
+	embeddings, err := db.ListEmbeddings(ctx, "model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(embeddings) != 0 {
+		t.Fatalf("expected no orphan embeddings, got %d", len(embeddings))
+	}
+}
+
+func TestGetEmbeddingStatus(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	first, err := db.CreateNote(ctx, CreateNoteInput{Title: "First", Body: "one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateNote(ctx, CreateNoteInput{Title: "Second", Body: "two"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpsertEmbedding(ctx, UpsertEmbeddingInput{NoteID: first.ID, Model: "model-a", Text: first.Body, Vector: []float64{0.1}}); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := db.GetEmbeddingStatus(ctx, "model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.NotesTotal != 2 || status.EmbeddingsTotal != 1 || status.MissingForModel != 1 {
+		t.Fatalf("unexpected status: %#v", status)
+	}
+}

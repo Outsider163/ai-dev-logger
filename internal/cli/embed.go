@@ -14,15 +14,18 @@ import (
 )
 
 var embedCmd = &cobra.Command{
-	Use:   "embed <id>",
-	Short: "Generate and store an embedding for a note",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		id, err := strconv.ParseInt(args[0], 10, 64)
-		if err != nil || id <= 0 {
-			return fmt.Errorf("id must be a positive number")
+	Use:   "embed [id]",
+	Short: "Generate and store note embeddings",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if embedAll && len(args) != 0 {
+			return fmt.Errorf("--all does not accept a note id")
 		}
-
+		if !embedAll && len(args) != 1 {
+			return fmt.Errorf("pass a note id or use --all")
+		}
+		return nil
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := appconfig.Load(configPath)
 		if err != nil {
 			return err
@@ -34,33 +37,69 @@ var embedCmd = &cobra.Command{
 		}
 		defer db.Close()
 
-		note, err := db.GetNote(cmd.Context(), id)
-		if errors.Is(err, store.ErrNoteNotFound) {
-			return fmt.Errorf("note #%d not found", id)
-		}
-		if err != nil {
-			return err
+		var notes []store.Note
+		if embedAll {
+			notes, err = db.ListAllNotes(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if len(notes) == 0 {
+				fmt.Println("no notes to embed")
+				return nil
+			}
+		} else {
+			id, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil || id <= 0 {
+				return fmt.Errorf("id must be a positive number")
+			}
+			note, err := db.GetNote(cmd.Context(), id)
+			if errors.Is(err, store.ErrNoteNotFound) {
+				return fmt.Errorf("note #%d not found", id)
+			}
+			if err != nil {
+				return err
+			}
+			notes = []store.Note{note}
 		}
 
-		text := noteEmbeddingText(note)
-		vector, err := llm.NewClient(cfg.LLM).CreateEmbedding(cmd.Context(), text)
-		if err != nil {
-			return fmt.Errorf("create embedding: %w", err)
+		client := llm.NewClient(cfg.LLM)
+		for _, note := range notes {
+			if err := saveNoteEmbedding(cmd, db, client, cfg.LLM.EmbeddingModel, note); err != nil {
+				return err
+			}
 		}
-
-		embedding, err := db.UpsertEmbedding(cmd.Context(), store.UpsertEmbeddingInput{
-			NoteID: note.ID,
-			Model:  cfg.LLM.EmbeddingModel,
-			Text:   text,
-			Vector: vector,
-		})
-		if err != nil {
-			return err
+		if embedAll {
+			fmt.Printf("rebuilt embeddings for %d notes\n", len(notes))
 		}
-
-		fmt.Printf("saved embedding for note #%d using %s (%d dimensions)\n", embedding.NoteID, embedding.Model, embedding.Dimensions)
 		return nil
 	},
+}
+
+var embedAll bool
+
+func init() {
+	embedCmd.Flags().BoolVar(&embedAll, "all", false, "Generate embeddings for every note")
+}
+
+func saveNoteEmbedding(cmd *cobra.Command, db *store.Store, client *llm.Client, model string, note store.Note) error {
+	text := noteEmbeddingText(note)
+	vector, err := client.CreateEmbedding(cmd.Context(), text)
+	if err != nil {
+		return fmt.Errorf("create embedding for note #%d: %w", note.ID, err)
+	}
+
+	embedding, err := db.UpsertEmbedding(cmd.Context(), store.UpsertEmbeddingInput{
+		NoteID: note.ID,
+		Model:  model,
+		Text:   text,
+		Vector: vector,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("saved embedding for note #%d using %s (%d dimensions)\n", embedding.NoteID, embedding.Model, embedding.Dimensions)
+	return nil
 }
 
 func noteEmbeddingText(note store.Note) string {

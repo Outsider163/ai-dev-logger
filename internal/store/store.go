@@ -150,6 +150,21 @@ LIMIT ?
 	return scanNotes(rows)
 }
 
+// ListAllNotes returns every note for maintenance tasks such as re-embedding.
+func (s *Store) ListAllNotes(ctx context.Context) ([]Note, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, title, body, tags_json, summary, created_at, updated_at
+FROM notes
+ORDER BY id ASC
+`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanNotes(rows)
+}
+
 func (s *Store) GetNote(ctx context.Context, id int64) (Note, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, title, body, tags_json, summary, created_at, updated_at
@@ -210,6 +225,11 @@ WHERE id = ?
 		return Note{}, ErrNoteNotFound
 	}
 
+	// The note text changed, so all of its stored vectors are stale.
+	if err := s.DeleteEmbeddings(ctx, note.ID); err != nil {
+		return Note{}, err
+	}
+
 	return note, nil
 }
 
@@ -228,6 +248,10 @@ WHERE id = ?
 	}
 	if affected == 0 {
 		return ErrNoteNotFound
+	}
+	// Keep vector search from seeing an embedding whose note was deleted.
+	if err := s.DeleteEmbeddings(ctx, id); err != nil {
+		return err
 	}
 
 	return nil

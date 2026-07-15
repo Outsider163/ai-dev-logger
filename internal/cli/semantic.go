@@ -14,6 +14,7 @@ import (
 )
 
 var semanticLimit int
+var semanticExplain bool
 
 type semanticMatch struct {
 	note  store.Note
@@ -82,10 +83,29 @@ var semanticCmd = &cobra.Command{
 			}
 			fmt.Printf("    %s\n\n", firstLine(match.note.Body))
 		}
+
+		if semanticExplain {
+			contextNotes := make([]llm.SearchNote, 0, semanticLimit)
+			for _, match := range matches[:semanticLimit] {
+				contextNotes = append(contextNotes, llm.SearchNote{
+					Title:   match.note.Title,
+					Tags:    match.note.Tags,
+					Summary: match.note.Summary,
+					Body:    match.note.Body,
+				})
+			}
+
+			explanation, err := llm.NewClient(cfg.LLM).ExplainSearch(cmd.Context(), query, contextNotes)
+			if err != nil {
+				return fmt.Errorf("explain search results: %w", err)
+			}
+			fmt.Printf("AI explanation:\n%s\n", explanation)
+		}
 		return nil
 	},
 }
 
 func init() {
 	semanticCmd.Flags().IntVar(&semanticLimit, "limit", 5, "Maximum number of matches to show")
+	semanticCmd.Flags().BoolVar(&semanticExplain, "explain", false, "Ask the chat model to explain the matching notes")
 }
