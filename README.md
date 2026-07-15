@@ -91,6 +91,7 @@ go run . semantic "how to avoid concurrent access bugs"
 go run . semantic "how to avoid concurrent access bugs" --explain
 go run . embed --all
 go run . status
+go run . add --title "Go map concurrency" --body "Use a mutex for shared map access." --embed
 ```
 
 当前语义检索准备进度：
