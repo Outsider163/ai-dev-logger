@@ -40,6 +40,7 @@ func init() {
 	rootCmd.AddCommand(showCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(searchCmd)
+	rootCmd.AddCommand(semanticCmd)
 }
 
 func defaultDBPath() string {

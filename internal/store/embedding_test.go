@@ -111,3 +111,30 @@ func TestUpsertEmbeddingRequiresExistingNote(t *testing.T) {
 		t.Fatalf("expected ErrNoteNotFound, got %v", err)
 	}
 }
+
+func TestListEmbeddingsByModel(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for _, model := range []string{"model-a", "model-b", "model-a"} {
+		note, err := db.CreateNote(ctx, CreateNoteInput{Title: model, Body: "body"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.UpsertEmbedding(ctx, UpsertEmbeddingInput{NoteID: note.ID, Model: model, Text: "body", Vector: []float64{0.1}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	embeddings, err := db.ListEmbeddings(ctx, "model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(embeddings) != 2 {
+		t.Fatalf("expected 2 embeddings, got %d", len(embeddings))
+	}
+}

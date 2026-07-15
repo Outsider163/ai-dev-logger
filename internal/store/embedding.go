@@ -94,6 +94,36 @@ WHERE note_id = ? AND model = ?
 	return embedding, nil
 }
 
+// ListEmbeddings returns all note embeddings created with one model.
+// Vectors from different models must not be compared with each other.
+func (s *Store) ListEmbeddings(ctx context.Context, model string) ([]NoteEmbedding, error) {
+	if model == "" {
+		return nil, fmt.Errorf("embedding model is required")
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT note_id, model, dimensions, vector_json, content_hash, created_at, updated_at
+FROM note_embeddings
+WHERE model = ?
+ORDER BY note_id ASC
+`, model)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var embeddings []NoteEmbedding
+	for rows.Next() {
+		embedding, err := scanEmbedding(rows)
+		if err != nil {
+			return nil, err
+		}
+		embeddings = append(embeddings, embedding)
+	}
+
+	return embeddings, rows.Err()
+}
+
 func (s *Store) DeleteEmbeddings(ctx context.Context, noteID int64) error {
 	_, err := s.db.ExecContext(ctx, `
 DELETE FROM note_embeddings

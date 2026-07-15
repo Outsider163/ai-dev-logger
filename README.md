@@ -87,6 +87,7 @@ go run . add --ai --title "Go map issue" --tag go --body "map concurrent read wr
 ```bash
 go run . config set --embedding-model "your-embedding-model"
 go run . embed 1
+go run . semantic "how to avoid concurrent access bugs"
 ```
 
 当前语义检索准备进度：
