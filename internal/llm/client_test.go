@@ -70,3 +70,57 @@ func TestEnhanceNoteRequiresConfig(t *testing.T) {
 		t.Fatal("expected missing config error")
 	}
 }
+
+func TestCreateEmbedding(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/embeddings" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Fatalf("unexpected authorization header: %s", got)
+		}
+
+		var req embeddingRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatal(err)
+		}
+		if req.Model != "embedding-test-model" {
+			t.Fatalf("unexpected model: %s", req.Model)
+		}
+		if req.Input != "hello embedding" {
+			t.Fatalf("unexpected input: %s", req.Input)
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"embedding": []float64{0.1, 0.2, 0.3}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(appconfig.LLMConfig{
+		APIKey:         "test-key",
+		BaseURL:        server.URL,
+		EmbeddingModel: "embedding-test-model",
+	})
+
+	vector, err := client.CreateEmbedding(context.Background(), "hello embedding")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vector) != 3 {
+		t.Fatalf("expected 3 dimensions, got %d", len(vector))
+	}
+	if vector[2] != 0.3 {
+		t.Fatalf("unexpected vector: %#v", vector)
+	}
+}
+
+func TestCreateEmbeddingRequiresConfig(t *testing.T) {
+	client := NewClient(appconfig.LLMConfig{})
+
+	if _, err := client.CreateEmbedding(context.Background(), "hello"); err == nil {
+		t.Fatal("expected missing config error")
+	}
+}
