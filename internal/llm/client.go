@@ -34,6 +34,14 @@ type EnhancedNote struct {
 	Tags    []string `json:"tags"`
 }
 
+// SearchNote is the small amount of note context needed for a search explanation.
+type SearchNote struct {
+	Title   string
+	Tags    []string
+	Summary string
+	Body    string
+}
+
 func NewClient(cfg appconfig.LLMConfig) *Client {
 	return &Client{
 		apiKey:         strings.TrimSpace(cfg.APIKey),
@@ -170,6 +178,73 @@ func (c *Client) CreateEmbedding(ctx context.Context, text string) ([]float64, e
 	return embeddingResp.Data[0].Embedding, nil
 }
 
+// ExplainSearch explains how the retrieved notes relate to a user's question.
+func (c *Client) ExplainSearch(ctx context.Context, query string, notes []SearchNote) (string, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return "", fmt.Errorf("search query is empty")
+	}
+	if len(notes) == 0 {
+		return "", fmt.Errorf("search notes are empty")
+	}
+	if c.apiKey == "" {
+		return "", fmt.Errorf("llm api key is empty, run config set --api-key")
+	}
+	if c.baseURL == "" {
+		return "", fmt.Errorf("llm base url is empty, run config set --base-url")
+	}
+	if c.model == "" {
+		return "", fmt.Errorf("llm model is empty, run config set --model")
+	}
+
+	reqBody := chatCompletionRequest{
+		Model: c.model,
+		Messages: []chatMessage{
+			{Role: "system", Content: searchExplainSystemPrompt},
+			{Role: "user", Content: buildSearchExplainPrompt(query, notes)},
+		},
+		Temperature: 0.2,
+	}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("llm request failed: status %d: %s", resp.StatusCode, strings.TrimSpace(string(respData)))
+	}
+
+	var chatResp chatCompletionResponse
+	if err := json.Unmarshal(respData, &chatResp); err != nil {
+		return "", err
+	}
+	if len(chatResp.Choices) == 0 {
+		return "", fmt.Errorf("llm response has no choices")
+	}
+
+	explanation := strings.TrimSpace(chatResp.Choices[0].Message.Content)
+	if explanation == "" {
+		return "", fmt.Errorf("llm explanation is empty")
+	}
+	return explanation, nil
+}
+
 type chatCompletionRequest struct {
 	Model          string            `json:"model"`
 	Messages       []chatMessage     `json:"messages"`
@@ -206,6 +281,11 @@ Return only a JSON object with these fields:
 - summary: one short Chinese summary
 - tags: 3 to 6 lowercase tags`
 
+const searchExplainSystemPrompt = `You are a programming knowledge assistant.
+Answer the user's question using only the retrieved local notes.
+Write concise Chinese Markdown. State uncertainty when the notes do not fully answer the question.
+Do not invent APIs, code details, or facts not present in the notes.`
+
 func buildEnhanceUserPrompt(input EnhanceNoteInput) string {
 	tagsJSON, _ := json.Marshal(input.Tags)
 
@@ -221,6 +301,33 @@ Original body:
 %s
 
 Return JSON only.`, input.Title, string(tagsJSON), input.Body)
+}
+
+func buildSearchExplainPrompt(query string, notes []SearchNote) string {
+	var builder strings.Builder
+	builder.WriteString("User question:\n")
+	builder.WriteString(query)
+	builder.WriteString("\n\nRetrieved notes:\n")
+
+	for i, note := range notes {
+		fmt.Fprintf(&builder, "\n[%d] Title: %s\n", i+1, note.Title)
+		if len(note.Tags) > 0 {
+			fmt.Fprintf(&builder, "Tags: %s\n", strings.Join(note.Tags, ", "))
+		}
+		if strings.TrimSpace(note.Summary) != "" {
+			fmt.Fprintf(&builder, "Summary: %s\n", note.Summary)
+		}
+		fmt.Fprintf(&builder, "Body: %s\n", truncateRunes(note.Body, 1200))
+	}
+	return builder.String()
+}
+
+func truncateRunes(value string, limit int) string {
+	runes := []rune(strings.TrimSpace(value))
+	if len(runes) <= limit {
+		return string(runes)
+	}
+	return string(runes[:limit]) + "..."
 }
 
 func parseEnhancedNote(content string) (EnhancedNote, error) {

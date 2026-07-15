@@ -38,6 +38,7 @@ func init() {
 	rootCmd.AddCommand(embedCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(showCmd)
+	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(semanticCmd)

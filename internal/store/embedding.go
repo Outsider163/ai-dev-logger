@@ -30,6 +30,14 @@ type UpsertEmbeddingInput struct {
 	Vector []float64
 }
 
+// EmbeddingStatus describes whether notes are ready for semantic search.
+type EmbeddingStatus struct {
+	NotesTotal      int
+	EmbeddingsTotal int
+	MissingForModel int
+	EmbeddingModel  string
+}
+
 func (s *Store) UpsertEmbedding(ctx context.Context, input UpsertEmbeddingInput) (NoteEmbedding, error) {
 	if input.NoteID <= 0 {
 		return NoteEmbedding{}, fmt.Errorf("note id must be positive")
@@ -122,6 +130,30 @@ ORDER BY note_id ASC
 	}
 
 	return embeddings, rows.Err()
+}
+
+// GetEmbeddingStatus counts all embeddings and notes missing an embedding for one model.
+func (s *Store) GetEmbeddingStatus(ctx context.Context, model string) (EmbeddingStatus, error) {
+	if model == "" {
+		return EmbeddingStatus{}, fmt.Errorf("embedding model is required")
+	}
+
+	status := EmbeddingStatus{EmbeddingModel: model}
+	if err := s.db.QueryRowContext(ctx, `
+SELECT
+	(SELECT COUNT(*) FROM notes),
+	(SELECT COUNT(*) FROM note_embeddings WHERE model = ?),
+	(
+		SELECT COUNT(*)
+		FROM notes AS n
+		LEFT JOIN note_embeddings AS e
+			ON e.note_id = n.id AND e.model = ?
+		WHERE e.note_id IS NULL
+	)
+`, model, model).Scan(&status.NotesTotal, &status.EmbeddingsTotal, &status.MissingForModel); err != nil {
+		return EmbeddingStatus{}, err
+	}
+	return status, nil
 }
 
 func (s *Store) DeleteEmbeddings(ctx context.Context, noteID int64) error {

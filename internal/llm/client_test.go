@@ -124,3 +124,26 @@ func TestCreateEmbeddingRequiresConfig(t *testing.T) {
 		t.Fatal("expected missing config error")
 	}
 }
+
+func TestExplainSearch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{
+				"message": map[string]string{"role": "assistant", "content": "Use a mutex around the shared map."},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(appconfig.LLMConfig{APIKey: "test-key", BaseURL: server.URL, Model: "test-model"})
+	explanation, err := client.ExplainSearch(context.Background(), "How should I share a map?", []SearchNote{{Title: "Go map", Body: "Use sync.Mutex."}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explanation != "Use a mutex around the shared map." {
+		t.Fatalf("unexpected explanation: %s", explanation)
+	}
+}
