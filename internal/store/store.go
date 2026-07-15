@@ -82,6 +82,20 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at);
+
+CREATE TABLE IF NOT EXISTS note_embeddings (
+	note_id INTEGER NOT NULL,
+	model TEXT NOT NULL,
+	dimensions INTEGER NOT NULL,
+	vector_json TEXT NOT NULL,
+	content_hash TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	PRIMARY KEY (note_id, model),
+	FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_embeddings_model ON note_embeddings(model);
 `)
 	return err
 }
