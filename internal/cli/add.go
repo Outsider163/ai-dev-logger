@@ -17,6 +17,7 @@ var addTitle string
 var addBody string
 var addTags []string
 var addAI bool
+var addEmbed bool
 
 var addCmd = &cobra.Command{
 	Use:   "add",
@@ -38,12 +39,15 @@ var addCmd = &cobra.Command{
 		tags := cleanTags(addTags)
 		summary := ""
 
-		if addAI {
-			cfg, err := appconfig.Load(configPath)
+		var cfg appconfig.Config
+		if addAI || addEmbed {
+			cfg, err = appconfig.Load(configPath)
 			if err != nil {
 				return err
 			}
+		}
 
+		if addAI {
 			enhanced, err := llm.NewClient(cfg.LLM).EnhanceNote(cmd.Context(), llm.EnhanceNoteInput{
 				Title: title,
 				Body:  body,
@@ -80,6 +84,11 @@ var addCmd = &cobra.Command{
 		}
 
 		fmt.Printf("saved note #%d\n", note.ID)
+		if addEmbed {
+			if err := saveNoteEmbedding(cmd, db, llm.NewClient(cfg.LLM), cfg.LLM.EmbeddingModel, note); err != nil {
+				return fmt.Errorf("note #%d was saved, but its embedding failed: %w", note.ID, err)
+			}
+		}
 		return nil
 	},
 }
@@ -89,6 +98,7 @@ func init() {
 	addCmd.Flags().StringVarP(&addBody, "body", "b", "", "Note body, Markdown is supported")
 	addCmd.Flags().StringArrayVar(&addTags, "tag", nil, "Tag, can be used multiple times")
 	addCmd.Flags().BoolVar(&addAI, "ai", false, "Use LLM to polish body, summarize, and generate tags")
+	addCmd.Flags().BoolVar(&addEmbed, "embed", false, "Generate an embedding after the note is saved")
 }
 
 func readBody() (string, error) {
