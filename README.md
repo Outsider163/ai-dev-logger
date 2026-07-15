@@ -94,6 +94,10 @@ go run . status
 go run . add --title "Go map concurrency" --body "Use a mutex for shared map access." --embed
 ```
 
+V1 验收命令与预期结果见 `docs/STEP_13.md`。
+
+日常使用请看 `docs/USER_GUIDE.md`，构建与交付请看 `docs/STEP_14.md`。
+
 当前语义检索准备进度：
 
 - 已新增 `note_embeddings` 表，用于保存笔记向量。
