@@ -17,6 +17,7 @@
 - 使用最低相似度过滤结果，并让 AI 解读引用本地笔记编号
 - 检查、增量更新和强制重建笔记向量索引
 - 使用 `doctor` 定位配置、数据库和模型接口问题
+- 将全部笔记导出为适合阅读的 Markdown 或结构化 JSON
 
 ## 项目文档
 
@@ -399,6 +400,32 @@ ai-dev-logger semantic "如何保护并发访问的共享数据" `
 
 程序会先输出匹配笔记，再把笔记 ID、相似度和内容作为上下文交给聊天模型，生成 `AI explanation`。模型会被要求使用 `[Note #ID]` 标注本地依据。该操作会比普通语义检索多调用一次聊天接口。
 
+## 导出笔记
+
+导出成适合阅读、分享和打印的 Markdown：
+
+```powershell
+ai-dev-logger export `
+  --format markdown `
+  --output "$env:USERPROFILE\Documents\ai-dev-notes.md"
+```
+
+导出成保留完整字段、适合程序处理和后续迁移的 JSON：
+
+```powershell
+ai-dev-logger export `
+  --format json `
+  --output "$env:USERPROFILE\Documents\ai-dev-notes.json"
+```
+
+`--format` 默认是 `markdown`，也可以简写为 `md`；`--output`（简写 `-o`）必须提供。目标目录不存在时程序会自动创建，但为了保护已有备份，目标文件已经存在时默认拒绝覆盖。确认需要替换时显式添加：
+
+```powershell
+ai-dev-logger export --format json --output .\notes.json --force
+```
+
+导出只读取本地 SQLite，不调用 LLM。JSON 和 Markdown 都包含笔记 ID、标题、正文、标签、摘要及创建/更新时间，不包含 API Key 和向量。向量体积较大且与 embedding 模型绑定，可以在导入笔记后重新生成。
+
 ## 数据文件
 
 Windows 默认数据目录：
@@ -432,6 +459,8 @@ Copy-Item `
 ```
 
 恢复时，把备份文件复制回原来的数据目录，或通过 `--db` 指定备份数据库。
+
+复制 `notes.db` 是包含向量的完整数据库备份；`export` 是只包含笔记内容的逻辑导出，适合阅读、跨工具处理和后续迁移，两者用途不同。
 
 ## 常见问题
 
@@ -559,6 +588,8 @@ embed --all --force         强制重建全部笔记向量
 status                      检查向量索引状态
 doctor                      离线检查配置和数据库
 doctor --online             真实检查聊天和向量接口
+export --format markdown -o notes.md  导出 Markdown
+export --format json -o notes.json    导出 JSON
 semantic <query>            语义检索
 semantic <query> --min-score 0.65  过滤低相似度结果
 semantic <query> --explain  语义检索并生成 AI 解读
