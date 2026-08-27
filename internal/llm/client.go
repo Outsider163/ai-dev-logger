@@ -62,14 +62,8 @@ func NewClient(cfg appconfig.LLMConfig) *Client {
 }
 
 func (c *Client) EnhanceNote(ctx context.Context, input EnhanceNoteInput) (EnhancedNote, error) {
-	if c.apiKey == "" {
-		return EnhancedNote{}, missingAPIKeyError()
-	}
-	if c.baseURL == "" {
-		return EnhancedNote{}, fmt.Errorf("llm base url is empty, run config set --base-url")
-	}
-	if c.model == "" {
-		return EnhancedNote{}, fmt.Errorf("llm model is empty, run config set --model")
+	if err := c.ValidateChatConfig(); err != nil {
+		return EnhancedNote{}, err
 	}
 
 	reqBody := chatCompletionRequest{
@@ -141,6 +135,54 @@ func (c *Client) ValidateEmbeddingConfig() error {
 	return nil
 }
 
+// ValidateChatConfig checks settings shared by chat-based operations.
+func (c *Client) ValidateChatConfig() error {
+	if c.apiKey == "" {
+		return missingAPIKeyError()
+	}
+	if c.baseURL == "" {
+		return fmt.Errorf("llm base url is empty, run config set --base-url")
+	}
+	if c.model == "" {
+		return fmt.Errorf("llm model is empty, run config set --model")
+	}
+	return nil
+}
+
+// ProbeChat sends a minimal request without creating or changing a note.
+func (c *Client) ProbeChat(ctx context.Context) error {
+	if err := c.ValidateChatConfig(); err != nil {
+		return err
+	}
+
+	reqBody := chatCompletionRequest{
+		Model: c.model,
+		Messages: []chatMessage{
+			{Role: "system", Content: "This is a connection check. Reply with OK."},
+			{Role: "user", Content: "OK"},
+		},
+		Temperature: 0,
+	}
+
+	var chatResp chatCompletionResponse
+	if err := c.postJSON(ctx, "/chat/completions", reqBody, &chatResp); err != nil {
+		return fmt.Errorf("probe chat: %w", err)
+	}
+	if len(chatResp.Choices) == 0 {
+		return fmt.Errorf("probe chat: llm response has no choices")
+	}
+	return nil
+}
+
+// ProbeEmbedding sends a small input and returns the vector dimensions.
+func (c *Client) ProbeEmbedding(ctx context.Context) (int, error) {
+	embedding, err := c.CreateEmbedding(ctx, "ai-dev-logger connection check")
+	if err != nil {
+		return 0, fmt.Errorf("probe embedding: %w", err)
+	}
+	return len(embedding), nil
+}
+
 // ExplainSearch explains how the retrieved notes relate to a user's question.
 func (c *Client) ExplainSearch(ctx context.Context, query string, notes []SearchNote) (string, error) {
 	query = strings.TrimSpace(query)
@@ -150,14 +192,8 @@ func (c *Client) ExplainSearch(ctx context.Context, query string, notes []Search
 	if len(notes) == 0 {
 		return "", fmt.Errorf("search notes are empty")
 	}
-	if c.apiKey == "" {
-		return "", missingAPIKeyError()
-	}
-	if c.baseURL == "" {
-		return "", fmt.Errorf("llm base url is empty, run config set --base-url")
-	}
-	if c.model == "" {
-		return "", fmt.Errorf("llm model is empty, run config set --model")
+	if err := c.ValidateChatConfig(); err != nil {
+		return "", err
 	}
 
 	reqBody := chatCompletionRequest{

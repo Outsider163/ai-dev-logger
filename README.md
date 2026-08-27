@@ -16,6 +16,7 @@
 - 使用自然语言进行本地向量相似度检索
 - 使用最低相似度过滤结果，并让 AI 解读引用本地笔记编号
 - 检查、增量更新和强制重建笔记向量索引
+- 使用 `doctor` 定位配置、数据库和模型接口问题
 
 ## 项目文档
 
@@ -141,6 +142,33 @@ ai-dev-logger config show
 | `base_url` | OpenAI 兼容 API 的基础地址 |
 | `model` | 笔记润色和检索结果解读使用的聊天模型 |
 | `embedding_model` | 笔记向量化和语义检索使用的模型 |
+
+## 运行环境自检
+
+完成配置后，先执行离线检查：
+
+```powershell
+ai-dev-logger doctor
+```
+
+它会检查配置文件、SQLite 数据库、API Key 来源、API 地址格式、聊天模型和 embedding 模型。默认不会访问网络，也不会显示 API Key；数据库文件不存在时会初始化一个空数据库。
+
+检查状态含义：
+
+| 状态 | 含义 |
+| --- | --- |
+| `PASS` | 这一项检查通过 |
+| `WARN` | 可以继续，但需要留意提示 |
+| `FAIL` | 配置或服务存在问题，命令返回非零退出码 |
+| `SKIP` | 前置条件不满足，因此没有执行这一项 |
+
+需要真实验证聊天和向量接口时，显式开启在线检查：
+
+```powershell
+ai-dev-logger doctor --online --timeout 20s
+```
+
+在线模式会分别发送一次很小的聊天请求和 embedding 请求，可能产生少量 API 用量。`--timeout` 是每个在线检查的最长等待时间，默认值为 `15s`。
 
 ## 新增笔记
 
@@ -529,6 +557,8 @@ embed <id>                  增量生成一条笔记的向量
 embed --all                 增量更新全部笔记向量
 embed --all --force         强制重建全部笔记向量
 status                      检查向量索引状态
+doctor                      离线检查配置和数据库
+doctor --online             真实检查聊天和向量接口
 semantic <query>            语义检索
 semantic <query> --min-score 0.65  过滤低相似度结果
 semantic <query> --explain  语义检索并生成 AI 解读

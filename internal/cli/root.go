@@ -37,6 +37,7 @@ func init() {
 	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(deleteCmd)
+	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(embedCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(showCmd)
