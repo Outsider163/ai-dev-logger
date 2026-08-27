@@ -19,6 +19,7 @@
 - 使用 `doctor` 定位配置、数据库和模型接口问题
 - 将全部笔记导出为适合阅读的 Markdown 或结构化 JSON
 - 严格校验并事务化导入 JSON，支持预演和重复策略
+- 安全生成包含笔记和向量的 SQLite 快照，自动检查完整性并计算 SHA-256
 
 ## 项目文档
 
@@ -481,17 +482,45 @@ ai-dev-logger --config D:\notes\config.json config show
 
 ## 备份
 
-退出正在运行的命令后，复制 SQLite 数据库即可完成备份：
+推荐使用 `backup` 命令生成包含笔记和向量的完整 SQLite 快照：
 
 ```powershell
-Copy-Item `
-  "$env:APPDATA\ai-dev-logger\notes.db" `
-  "$env:USERPROFILE\Documents\ai-dev-logger-backup.db"
+ai-dev-logger backup `
+  --output "$env:USERPROFILE\Documents\ai-dev-logger-backup.db"
 ```
 
-恢复时，把备份文件复制回原来的数据目录，或通过 `--db` 指定备份数据库。
+输出示例：
 
-复制 `notes.db` 是包含向量的完整数据库备份；`export` 是只包含笔记内容的逻辑导出，适合阅读、跨工具处理和后续迁移，两者用途不同。
+```text
+backup created: C:\Users\you\Documents\ai-dev-logger-backup.db
+size: 32768 bytes
+sha256: 6f1c...
+integrity: ok
+```
+
+程序使用 SQLite 的 `VACUUM INTO` 创建一致快照，随后自动执行 `PRAGMA integrity_check`，只有检查通过后才安装目标文件。最后输出文件大小和 SHA-256，方便判断文件在复制或上传后有没有发生变化。
+
+目标文件存在时默认拒绝覆盖。确认要替换旧备份时使用：
+
+```powershell
+ai-dev-logger backup --output .\notes-backup.db --force
+```
+
+可以在 PowerShell 中重新计算校验值，并与备份命令输出的 `sha256` 比较：
+
+```powershell
+(Get-FileHash .\notes-backup.db -Algorithm SHA256).Hash.ToLower()
+```
+
+恢复前先退出正在运行的命令，并先保留当前数据库。可以先通过 `--db` 直接检查备份内容：
+
+```powershell
+ai-dev-logger --db .\notes-backup.db list --limit 100
+```
+
+确认无误后，再把备份复制回默认数据目录。`backup` 只备份 SQLite 数据库，不包含 `config.json`，因此不会把配置文件中可能保存的 API Key 一起打包。
+
+`backup` 是包含向量的完整数据库备份；`export` 是只包含笔记内容的逻辑导出，适合阅读、跨工具处理和后续迁移，两者用途不同。
 
 ## 常见问题
 
@@ -623,6 +652,7 @@ export --format markdown -o notes.md  导出 Markdown
 export --format json -o notes.json    导出 JSON
 import -i notes.json --dry-run        预演 JSON 导入
 import -i notes.json                  事务化导入 JSON
+backup -o notes-backup.db             创建并校验完整数据库备份
 semantic <query>            语义检索
 semantic <query> --min-score 0.65  过滤低相似度结果
 semantic <query> --explain  语义检索并生成 AI 解读
