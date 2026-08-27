@@ -40,6 +40,7 @@ func init() {
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(embedCmd)
 	rootCmd.AddCommand(exportCmd)
+	rootCmd.AddCommand(importCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(showCmd)
 	rootCmd.AddCommand(statusCmd)

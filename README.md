@@ -18,6 +18,7 @@
 - 检查、增量更新和强制重建笔记向量索引
 - 使用 `doctor` 定位配置、数据库和模型接口问题
 - 将全部笔记导出为适合阅读的 Markdown 或结构化 JSON
+- 严格校验并事务化导入 JSON，支持预演和重复策略
 
 ## 项目文档
 
@@ -426,6 +427,36 @@ ai-dev-logger export --format json --output .\notes.json --force
 
 导出只读取本地 SQLite，不调用 LLM。JSON 和 Markdown 都包含笔记 ID、标题、正文、标签、摘要及创建/更新时间，不包含 API Key 和向量。向量体积较大且与 embedding 模型绑定，可以在导入笔记后重新生成。
 
+## 导入笔记
+
+`import` 只接受由本项目导出的 JSON，不接受 Markdown。建议先预演：
+
+```powershell
+ai-dev-logger import --input .\notes.json --dry-run
+```
+
+确认数量和重复项符合预期后执行真实导入：
+
+```powershell
+ai-dev-logger import --input .\notes.json
+```
+
+重复笔记由 `--on-duplicate` 控制：
+
+| 策略 | 行为 |
+| --- | --- |
+| `skip` | 默认值，跳过重复内容并继续导入 |
+| `error` | 遇到第一条重复内容时报错，整批回滚 |
+| `allow` | 允许创建内容完全相同的新笔记 |
+
+重复内容根据标题、正文、摘要和标签判断；标签顺序及大小写不影响结果。导入会严格检查 `schema_version`、未知字段、源 ID、时间和必填内容，并在一个 SQLite 事务中处理整批数据。任何错误都会回滚，不会留下只导入一半的批次。
+
+源文件中的 ID 只用于错误定位，不会覆盖本地 SQLite 主键；创建时间和更新时间会保留。向量不会导入，成功导入后运行：
+
+```powershell
+ai-dev-logger embed --all
+```
+
 ## 数据文件
 
 Windows 默认数据目录：
@@ -590,6 +621,8 @@ doctor                      离线检查配置和数据库
 doctor --online             真实检查聊天和向量接口
 export --format markdown -o notes.md  导出 Markdown
 export --format json -o notes.json    导出 JSON
+import -i notes.json --dry-run        预演 JSON 导入
+import -i notes.json                  事务化导入 JSON
 semantic <query>            语义检索
 semantic <query> --min-score 0.65  过滤低相似度结果
 semantic <query> --explain  语义检索并生成 AI 解读
