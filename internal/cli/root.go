@@ -1,11 +1,12 @@
 package cli
 
 import (
-	appconfig "ai-dev-logger/internal/config"
-
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"ai-dev-logger/internal/buildinfo"
+	appconfig "ai-dev-logger/internal/config"
 
 	"github.com/spf13/cobra"
 )
@@ -17,6 +18,7 @@ var rootCmd = &cobra.Command{
 	Use:           "ai-dev-logger",
 	Short:         "AI development note CLI",
 	Long:          "ai-dev-logger is a local CLI for collecting and searching development notes.",
+	Version:       buildinfo.Version,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -42,6 +44,7 @@ func init() {
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(semanticCmd)
+	rootCmd.AddCommand(versionCmd)
 }
 
 func defaultDBPath() string {

@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish Windows release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOTOOLCHAIN: local
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.22.x'
+          cache-dependency-path: go.sum
+
+      - name: Validate semantic version tag
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Invalid release tag: $GITHUB_REF_NAME"
+            echo "Expected a semantic version such as v1.2.3 or v1.2.3-rc.1"
+            exit 1
+          fi
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run release checks
+        shell: bash
+        run: |
+          mapfile -t go_files < <(git ls-files '*.go')
+          unformatted="$(gofmt -l "${go_files[@]}")"
+          if [[ -n "$unformatted" ]]; then
+            echo "The following Go files are not formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          go test ./... -count=1
+          go vet ./...
+
+      - name: Build and package Windows CLI
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          built_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          linker_flags="-s -w -X ai-dev-logger/internal/buildinfo.Version=${VERSION} -X ai-dev-logger/internal/buildinfo.Commit=${COMMIT} -X ai-dev-logger/internal/buildinfo.BuiltAt=${built_at}"
+
+          version_output="$(go run -ldflags "$linker_flags" . --version)"
+          echo "$version_output"
+          grep -F "$VERSION" <<< "$version_output"
+
+          mkdir -p dist/package
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$linker_flags" -o dist/package/ai-dev-logger.exe .
+          cp README.md dist/package/README.md
+
+          archive_name="ai-dev-logger_${VERSION}_windows_amd64.zip"
+          (cd dist/package && zip -q "../${archive_name}" ai-dev-logger.exe README.md)
+          (cd dist && sha256sum "$archive_name" > checksums.txt)
+
+          echo "ARCHIVE_NAME=$archive_name" >> "$GITHUB_ENV"
+          unzip -l "dist/$archive_name"
+          cat dist/checksums.txt
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          prerelease_flag=()
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease_flag+=(--prerelease)
+          fi
+
+          gh release create "$VERSION" \
+            "dist/${ARCHIVE_NAME}#Windows amd64" \
+            "dist/checksums.txt#SHA-256 checksums" \
+            --verify-tag \
+            --generate-notes \
+            --title "ai-dev-logger ${VERSION}" \
+            "${prerelease_flag[@]}"

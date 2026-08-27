@@ -30,6 +30,34 @@
 
 ## 构建
 
+### 下载发布版本
+
+发布后的 Windows 压缩包位于 [GitHub Releases](https://github.com/Outsider163/ai-dev-logger/releases)。下载：
+
+```text
+ai-dev-logger_vX.Y.Z_windows_amd64.zip
+checksums.txt
+```
+
+解压后可以查看版本：
+
+```powershell
+.\ai-dev-logger.exe --version
+.\ai-dev-logger.exe version
+```
+
+使用 SHA-256 检查下载文件是否完整：
+
+```powershell
+Get-FileHash `
+  .\ai-dev-logger_vX.Y.Z_windows_amd64.zip `
+  -Algorithm SHA256
+```
+
+将输出哈希与 `checksums.txt` 中对应文件的哈希比较。
+
+### 从源码构建
+
 在项目根目录打开 PowerShell：
 
 ```powershell
@@ -49,6 +77,8 @@ go build -o dist\ai-dev-logger.exe .
 ```powershell
 go run . --help
 ```
+
+普通源码构建没有发布 Tag，因此版本显示为 `dev`。GitHub Release 构建会自动注入 Tag、Git 提交和 UTC 构建时间。
 
 以下示例使用 `ai-dev-logger` 表示可执行文件。如果没有把它加入 `PATH`，请在 Windows 项目目录中替换为：
 
@@ -463,6 +493,27 @@ go vet ./...
 go build -trimpath -o dist\ai-dev-logger.exe .
 ```
 
+## 创建发布版本
+
+本地模拟打包：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\package.ps1 `
+  -Version v1.1.0
+```
+
+脚本要求 Git 工作区干净，并在 `dist` 中生成 Windows ZIP 和 `checksums.txt`。
+
+确认主分支已经推送且 CI 通过后，维护者可以创建并推送版本标签：
+
+```powershell
+git tag -a v1.1.0 -m "Release v1.1.0"
+git push origin v1.1.0
+```
+
+`.github/workflows/release.yml` 会验证标签、运行质量检查、构建 Windows 二进制、生成 SHA-256 校验文件，并通过 GitHub 自动生成版本说明。预发布标签如 `v1.2.0-rc.1` 会自动创建为 Pre-release。
+
 ## 命令速查
 
 ```text
@@ -482,4 +533,6 @@ semantic <query>            语义检索
 semantic <query> --min-score 0.65  过滤低相似度结果
 semantic <query> --explain  语义检索并生成 AI 解读
 config path/show/set        管理配置
+version                     查看完整构建版本信息
+--version                   快速查看版本号
 ```
