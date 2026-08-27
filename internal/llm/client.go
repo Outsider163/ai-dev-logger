@@ -36,6 +36,8 @@ type EnhancedNote struct {
 
 // SearchNote is the small amount of note context needed for a search explanation.
 type SearchNote struct {
+	ID      int64
+	Score   float64
 	Title   string
 	Tags    []string
 	Summary string
@@ -284,6 +286,7 @@ Return only a JSON object with these fields:
 const searchExplainSystemPrompt = `You are a programming knowledge assistant.
 Answer the user's question using only the retrieved local notes.
 Write concise Chinese Markdown. State uncertainty when the notes do not fully answer the question.
+For every factual claim, cite supporting notes using [Note #ID].
 Do not invent APIs, code details, or facts not present in the notes.`
 
 func buildEnhanceUserPrompt(input EnhanceNoteInput) string {
@@ -309,8 +312,10 @@ func buildSearchExplainPrompt(query string, notes []SearchNote) string {
 	builder.WriteString(query)
 	builder.WriteString("\n\nRetrieved notes:\n")
 
-	for i, note := range notes {
-		fmt.Fprintf(&builder, "\n[%d] Title: %s\n", i+1, note.Title)
+	for _, note := range notes {
+		fmt.Fprintf(&builder, "\n[Note #%d]\n", note.ID)
+		fmt.Fprintf(&builder, "Similarity: %.4f\n", note.Score)
+		fmt.Fprintf(&builder, "Title: %s\n", note.Title)
 		if len(note.Tags) > 0 {
 			fmt.Fprintf(&builder, "Tags: %s\n", strings.Join(note.Tags, ", "))
 		}

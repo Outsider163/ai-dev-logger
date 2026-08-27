@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -15,10 +16,16 @@ import (
 
 var semanticLimit int
 var semanticExplain bool
+var semanticMinScore float64
 
 type semanticMatch struct {
 	note  store.Note
 	score float64
+}
+
+type skippedSemanticMatch struct {
+	noteID int64
+	err    error
 }
 
 var semanticCmd = &cobra.Command{
@@ -30,11 +37,22 @@ var semanticCmd = &cobra.Command{
 		if query == "" {
 			return fmt.Errorf("query is required")
 		}
+		if semanticLimit <= 0 {
+			return fmt.Errorf("limit must be positive")
+		}
+		if math.IsNaN(semanticMinScore) || semanticMinScore < -1 || semanticMinScore > 1 {
+			return fmt.Errorf("min-score must be between -1 and 1")
+		}
 
 		cfg, err := appconfig.Load(configPath)
 		if err != nil {
 			return err
 		}
+		model := strings.TrimSpace(cfg.LLM.EmbeddingModel)
+		if model == "" {
+			return fmt.Errorf("embedding model is empty, run config set --embedding-model")
+		}
+		cfg.LLM.EmbeddingModel = model
 
 		db, err := store.Open(dbPath)
 		if err != nil {
@@ -42,41 +60,46 @@ var semanticCmd = &cobra.Command{
 		}
 		defer db.Close()
 
+		candidates, err := db.ListEmbeddedNotes(cmd.Context(), model)
+		if err != nil {
+			return err
+		}
+		if len(candidates) == 0 {
+			return fmt.Errorf("no embeddings found for model %q; run embed --all first", model)
+		}
+
+		currentCandidates, stale := selectCurrentSemanticCandidates(candidates)
+		if stale > 0 {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: skipped %d stale embeddings; run ai-dev-logger embed --all\n", stale)
+		}
+		if len(currentCandidates) == 0 {
+			return fmt.Errorf("no current embeddings found for model %q; run embed --all first", model)
+		}
+
 		queryVector, err := llm.NewClient(cfg.LLM).CreateEmbedding(cmd.Context(), query)
 		if err != nil {
 			return fmt.Errorf("create query embedding: %w", err)
 		}
 
-		embeddings, err := db.ListEmbeddings(cmd.Context(), cfg.LLM.EmbeddingModel)
-		if err != nil {
-			return err
+		matches, invalid := rankSemanticMatches(queryVector, currentCandidates, semanticMinScore)
+		for _, skipped := range invalid {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: skipped note #%d: %v\n", skipped.noteID, skipped.err)
 		}
-		if len(embeddings) == 0 {
-			return fmt.Errorf("no embeddings found for model %q; run embed <id> first", cfg.LLM.EmbeddingModel)
+		if len(invalid) == len(currentCandidates) {
+			return fmt.Errorf("all stored embeddings are incompatible with the query vector; run embed --all --force")
 		}
-
-		matches := make([]semanticMatch, 0, len(embeddings))
-		for _, embedding := range embeddings {
-			score, err := semantic.CosineSimilarity(queryVector, embedding.Vector)
-			if err != nil {
-				return fmt.Errorf("compare note #%d: %w", embedding.NoteID, err)
-			}
-
-			note, err := db.GetNote(cmd.Context(), embedding.NoteID)
-			if err != nil {
-				return err
-			}
-			matches = append(matches, semanticMatch{note: note, score: score})
+		if len(matches) == 0 {
+			fmt.Printf("no semantic matches at or above %.4f\n", semanticMinScore)
+			return nil
 		}
 
-		sort.Slice(matches, func(i, j int) bool {
-			return matches[i].score > matches[j].score
-		})
-		if semanticLimit <= 0 || semanticLimit > len(matches) {
-			semanticLimit = len(matches)
+		resultLimit := semanticLimit
+		if resultLimit > len(matches) {
+			resultLimit = len(matches)
 		}
+		selected := matches[:resultLimit]
 
-		for _, match := range matches[:semanticLimit] {
+		for _, match := range selected {
 			fmt.Printf("#%d  %s  (similarity: %.4f)\n", match.note.ID, match.note.Title, match.score)
 			if len(match.note.Tags) > 0 {
 				fmt.Printf("    tags: %s\n", strings.Join(match.note.Tags, ", "))
@@ -85,9 +108,11 @@ var semanticCmd = &cobra.Command{
 		}
 
 		if semanticExplain {
-			contextNotes := make([]llm.SearchNote, 0, semanticLimit)
-			for _, match := range matches[:semanticLimit] {
+			contextNotes := make([]llm.SearchNote, 0, len(selected))
+			for _, match := range selected {
 				contextNotes = append(contextNotes, llm.SearchNote{
+					ID:      match.note.ID,
+					Score:   match.score,
 					Title:   match.note.Title,
 					Tags:    match.note.Tags,
 					Summary: match.note.Summary,
@@ -107,5 +132,43 @@ var semanticCmd = &cobra.Command{
 
 func init() {
 	semanticCmd.Flags().IntVar(&semanticLimit, "limit", 5, "Maximum number of matches to show")
+	semanticCmd.Flags().Float64Var(&semanticMinScore, "min-score", 0, "Minimum cosine similarity between -1 and 1")
 	semanticCmd.Flags().BoolVar(&semanticExplain, "explain", false, "Ask the chat model to explain the matching notes")
+}
+
+func selectCurrentSemanticCandidates(candidates []store.EmbeddedNote) ([]store.EmbeddedNote, int) {
+	current := make([]store.EmbeddedNote, 0, len(candidates))
+	stale := 0
+	for _, candidate := range candidates {
+		if !candidate.Embedding.MatchesText(store.NoteEmbeddingText(candidate.Note)) {
+			stale++
+			continue
+		}
+		current = append(current, candidate)
+	}
+	return current, stale
+}
+
+func rankSemanticMatches(queryVector []float64, candidates []store.EmbeddedNote, minScore float64) ([]semanticMatch, []skippedSemanticMatch) {
+	matches := make([]semanticMatch, 0, len(candidates))
+	var skipped []skippedSemanticMatch
+	for _, candidate := range candidates {
+		score, err := semantic.CosineSimilarity(queryVector, candidate.Embedding.Vector)
+		if err != nil {
+			skipped = append(skipped, skippedSemanticMatch{noteID: candidate.Note.ID, err: err})
+			continue
+		}
+		if score < minScore {
+			continue
+		}
+		matches = append(matches, semanticMatch{note: candidate.Note, score: score})
+	}
+
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].score == matches[j].score {
+			return matches[i].note.ID < matches[j].note.ID
+		}
+		return matches[i].score > matches[j].score
+	})
+	return matches, skipped
 }

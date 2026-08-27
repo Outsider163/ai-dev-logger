@@ -149,6 +149,54 @@ func TestListEmbeddingsByModel(t *testing.T) {
 	}
 }
 
+func TestListEmbeddedNotesJoinsNotesAndVectors(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	first, err := db.CreateNote(ctx, CreateNoteInput{Title: "First", Body: "body", Tags: []string{"go"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := db.CreateNote(ctx, CreateNoteInput{Title: "Second", Body: "body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpsertEmbedding(ctx, UpsertEmbeddingInput{
+		NoteID: first.ID,
+		Model:  "model-a",
+		Text:   NoteEmbeddingText(first),
+		Vector: []float64{0.1, 0.2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpsertEmbedding(ctx, UpsertEmbeddingInput{
+		NoteID: second.ID,
+		Model:  "model-b",
+		Text:   NoteEmbeddingText(second),
+		Vector: []float64{0.3, 0.4},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := db.ListEmbeddedNotes(ctx, "model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 joined item, got %d", len(items))
+	}
+	if items[0].Note.ID != first.ID || items[0].Note.Tags[0] != "go" {
+		t.Fatalf("unexpected joined note: %#v", items[0].Note)
+	}
+	if items[0].Embedding.NoteID != first.ID || items[0].Embedding.Vector[1] != 0.2 {
+		t.Fatalf("unexpected joined embedding: %#v", items[0].Embedding)
+	}
+}
+
 func TestUpdateNoteDeletesStaleEmbeddings(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "test.db"))

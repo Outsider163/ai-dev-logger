@@ -12,7 +12,7 @@
 - 使用 LLM 润色正文、生成摘要和补充标签
 - 为笔记生成 embedding 并保存到 SQLite
 - 使用自然语言进行本地向量相似度检索
-- 使用 AI 解读语义检索结果
+- 使用最低相似度过滤结果，并让 AI 解读引用本地笔记编号
 - 检查、增量更新和强制重建笔记向量索引
 
 ## 项目文档
@@ -265,6 +265,16 @@ run: ai-dev-logger embed --all
 ai-dev-logger semantic "如何保护并发访问的共享数据" --limit 5
 ```
 
+过滤相似度低于指定分数的结果：
+
+```powershell
+ai-dev-logger semantic "如何保护并发访问的共享数据" `
+  --limit 5 `
+  --min-score 0.65
+```
+
+`--min-score` 取值范围是 `-1` 到 `1`，默认值是 `0`。分数越高，向量方向越接近；合理阈值需要根据使用的模型和实际笔记测试后决定。
+
 输出示例：
 
 ```text
@@ -273,7 +283,7 @@ ai-dev-logger semantic "如何保护并发访问的共享数据" --limit 5
     使用 sync.Mutex 或 sync.Map 保护并发访问。
 ```
 
-语义检索会调用 embedding API 为查询语句生成向量，然后在本地计算查询向量与笔记向量的余弦相似度。
+语义检索会调用 embedding API 为查询语句生成向量，然后通过一次 SQLite 联表查询读取笔记和向量，最后在本地计算余弦相似度。过期向量和维度异常向量不会参与结果排序。
 
 只有使用当前 `embedding_model` 生成过向量的笔记才会参与检索。如果没有结果，先运行：
 
@@ -292,7 +302,7 @@ ai-dev-logger semantic "如何保护并发访问的共享数据" `
   --explain
 ```
 
-程序会先输出匹配笔记，再把这些笔记作为上下文交给聊天模型，生成 `AI explanation`。该操作会比普通语义检索多调用一次聊天接口。
+程序会先输出匹配笔记，再把笔记 ID、相似度和内容作为上下文交给聊天模型，生成 `AI explanation`。模型会被要求使用 `[Note #ID]` 标注本地依据。该操作会比普通语义检索多调用一次聊天接口。
 
 ## 数据文件
 
@@ -405,6 +415,7 @@ embed --all                 增量更新全部笔记向量
 embed --all --force         强制重建全部笔记向量
 status                      检查向量索引状态
 semantic <query>            语义检索
+semantic <query> --min-score 0.65  过滤低相似度结果
 semantic <query> --explain  语义检索并生成 AI 解读
 config path/show/set        管理配置
 ```

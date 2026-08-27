@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	appconfig "ai-dev-logger/internal/config"
@@ -130,20 +131,31 @@ func TestExplainSearch(t *testing.T) {
 		if r.URL.Path != "/chat/completions" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
+		var req chatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatal(err)
+		}
+		if len(req.Messages) != 2 || !strings.Contains(req.Messages[1].Content, "[Note #7]") {
+			t.Fatalf("expected note id in prompt, got %#v", req.Messages)
+		}
+		if !strings.Contains(req.Messages[1].Content, "Similarity: 0.9123") {
+			t.Fatalf("expected similarity in prompt, got %q", req.Messages[1].Content)
+		}
+
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{
-				"message": map[string]string{"role": "assistant", "content": "Use a mutex around the shared map."},
+				"message": map[string]string{"role": "assistant", "content": "Use a mutex around the shared map. [Note #7]"},
 			}},
 		})
 	}))
 	defer server.Close()
 
 	client := NewClient(appconfig.LLMConfig{APIKey: "test-key", BaseURL: server.URL, Model: "test-model"})
-	explanation, err := client.ExplainSearch(context.Background(), "How should I share a map?", []SearchNote{{Title: "Go map", Body: "Use sync.Mutex."}})
+	explanation, err := client.ExplainSearch(context.Background(), "How should I share a map?", []SearchNote{{ID: 7, Score: 0.9123, Title: "Go map", Body: "Use sync.Mutex."}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if explanation != "Use a mutex around the shared map." {
+	if explanation != "Use a mutex around the shared map. [Note #7]" {
 		t.Fatalf("unexpected explanation: %s", explanation)
 	}
 }

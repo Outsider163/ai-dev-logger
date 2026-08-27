@@ -24,6 +24,12 @@ type NoteEmbedding struct {
 	UpdatedAt   time.Time
 }
 
+// EmbeddedNote keeps a note and its vector together for semantic search.
+type EmbeddedNote struct {
+	Note      Note
+	Embedding NoteEmbedding
+}
+
 // MatchesText reports whether the embedding was generated from text with the same content.
 func (e NoteEmbedding) MatchesText(text string) bool {
 	return e.ContentHash == hashText(text)
@@ -138,6 +144,37 @@ ORDER BY note_id ASC
 	}
 
 	return embeddings, rows.Err()
+}
+
+// ListEmbeddedNotes reads notes and their vectors with one joined query.
+func (s *Store) ListEmbeddedNotes(ctx context.Context, model string) ([]EmbeddedNote, error) {
+	if model == "" {
+		return nil, fmt.Errorf("embedding model is required")
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT
+	n.id, n.title, n.body, n.tags_json, n.summary, n.created_at, n.updated_at,
+	e.note_id, e.model, e.dimensions, e.vector_json, e.content_hash, e.created_at, e.updated_at
+FROM note_embeddings AS e
+JOIN notes AS n ON n.id = e.note_id
+WHERE e.model = ?
+ORDER BY n.id ASC
+`, model)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var notes []EmbeddedNote
+	for rows.Next() {
+		note, err := scanEmbeddedNote(rows)
+		if err != nil {
+			return nil, err
+		}
+		notes = append(notes, note)
+	}
+	return notes, rows.Err()
 }
 
 // GetEmbeddingStatus classifies each note's embedding for one model.
@@ -263,6 +300,72 @@ func scanEmbedding(scanner embeddingScanner) (NoteEmbedding, error) {
 	}
 
 	return embedding, nil
+}
+
+func scanEmbeddedNote(scanner embeddingScanner) (EmbeddedNote, error) {
+	var item EmbeddedNote
+	var tagsJSON string
+	var noteCreatedAt string
+	var noteUpdatedAt string
+	var vectorJSON string
+	var embeddingCreatedAt string
+	var embeddingUpdatedAt string
+
+	if err := scanner.Scan(
+		&item.Note.ID,
+		&item.Note.Title,
+		&item.Note.Body,
+		&tagsJSON,
+		&item.Note.Summary,
+		&noteCreatedAt,
+		&noteUpdatedAt,
+		&item.Embedding.NoteID,
+		&item.Embedding.Model,
+		&item.Embedding.Dimensions,
+		&vectorJSON,
+		&item.Embedding.ContentHash,
+		&embeddingCreatedAt,
+		&embeddingUpdatedAt,
+	); err != nil {
+		return EmbeddedNote{}, err
+	}
+
+	if err := json.Unmarshal([]byte(tagsJSON), &item.Note.Tags); err != nil {
+		return EmbeddedNote{}, fmt.Errorf("decode tags for note %d: %w", item.Note.ID, err)
+	}
+
+	var err error
+	item.Note.CreatedAt, err = parseTime(noteCreatedAt)
+	if err != nil {
+		return EmbeddedNote{}, err
+	}
+	item.Note.UpdatedAt, err = parseTime(noteUpdatedAt)
+	if err != nil {
+		return EmbeddedNote{}, err
+	}
+
+	item.Embedding.Vector, err = decodeVector(vectorJSON)
+	if err != nil {
+		return EmbeddedNote{}, err
+	}
+	if len(item.Embedding.Vector) != item.Embedding.Dimensions {
+		return EmbeddedNote{}, fmt.Errorf(
+			"embedding dimensions mismatch for note %d: metadata=%d vector=%d",
+			item.Note.ID,
+			item.Embedding.Dimensions,
+			len(item.Embedding.Vector),
+		)
+	}
+	item.Embedding.CreatedAt, err = parseTime(embeddingCreatedAt)
+	if err != nil {
+		return EmbeddedNote{}, err
+	}
+	item.Embedding.UpdatedAt, err = parseTime(embeddingUpdatedAt)
+	if err != nil {
+		return EmbeddedNote{}, err
+	}
+
+	return item, nil
 }
 
 func encodeVector(vector []float64) (string, error) {
