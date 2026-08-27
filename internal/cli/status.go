@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	appconfig "ai-dev-logger/internal/config"
 	"ai-dev-logger/internal/store"
@@ -18,7 +19,8 @@ var statusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if cfg.LLM.EmbeddingModel == "" {
+		model := strings.TrimSpace(cfg.LLM.EmbeddingModel)
+		if model == "" {
 			return fmt.Errorf("embedding model is empty, run config set --embedding-model")
 		}
 
@@ -28,7 +30,7 @@ var statusCmd = &cobra.Command{
 		}
 		defer db.Close()
 
-		status, err := db.GetEmbeddingStatus(cmd.Context(), cfg.LLM.EmbeddingModel)
+		status, err := db.GetEmbeddingStatus(cmd.Context(), model)
 		if err != nil {
 			return err
 		}
@@ -36,9 +38,13 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("notes: %d\n", status.NotesTotal)
 		fmt.Printf("embedding model: %s\n", status.EmbeddingModel)
 		fmt.Printf("embeddings for current model: %d\n", status.EmbeddingsTotal)
+		fmt.Printf("notes with current embeddings: %d\n", status.CurrentForModel)
 		fmt.Printf("notes missing embeddings: %d\n", status.MissingForModel)
-		if status.MissingForModel > 0 {
+		fmt.Printf("notes with stale embeddings: %d\n", status.StaleForModel)
+		if status.MissingForModel+status.StaleForModel > 0 {
 			fmt.Println("run: ai-dev-logger embed --all")
+		} else {
+			fmt.Println("embedding index is up to date")
 		}
 		return nil
 	},

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -15,7 +16,7 @@ import (
 
 var embedCmd = &cobra.Command{
 	Use:   "embed [id]",
-	Short: "Generate and store note embeddings",
+	Short: "Incrementally generate and store note embeddings",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if embedAll && len(args) != 0 {
 			return fmt.Errorf("--all does not accept a note id")
@@ -30,6 +31,11 @@ var embedCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		model := strings.TrimSpace(cfg.LLM.EmbeddingModel)
+		if model == "" {
+			return fmt.Errorf("embedding model is empty, run config set --embedding-model")
+		}
+		cfg.LLM.EmbeddingModel = model
 
 		db, err := store.Open(dbPath)
 		if err != nil {
@@ -62,33 +68,53 @@ var embedCmd = &cobra.Command{
 			notes = []store.Note{note}
 		}
 
+		var existing []store.NoteEmbedding
+		if !embedForce {
+			existing, err = db.ListEmbeddings(cmd.Context(), model)
+			if err != nil {
+				return err
+			}
+		}
+
+		pending, skipped := selectNotesForEmbedding(notes, existing, model, embedForce)
+		if len(pending) == 0 {
+			if embedAll {
+				fmt.Printf("embedding index is up to date: 0 generated, %d skipped\n", skipped)
+			} else {
+				fmt.Printf("embedding for note #%d is already up to date\n", notes[0].ID)
+			}
+			return nil
+		}
+
 		client := llm.NewClient(cfg.LLM)
-		for _, note := range notes {
-			if err := saveNoteEmbedding(cmd, db, client, cfg.LLM.EmbeddingModel, note); err != nil {
+		for _, note := range pending {
+			if err := saveNoteEmbedding(cmd.Context(), db, client, model, note); err != nil {
 				return err
 			}
 		}
 		if embedAll {
-			fmt.Printf("rebuilt embeddings for %d notes\n", len(notes))
+			fmt.Printf("embedding index updated: %d generated, %d skipped\n", len(pending), skipped)
 		}
 		return nil
 	},
 }
 
 var embedAll bool
+var embedForce bool
 
 func init() {
-	embedCmd.Flags().BoolVar(&embedAll, "all", false, "Generate embeddings for every note")
+	embedCmd.Flags().BoolVar(&embedAll, "all", false, "Update embeddings for all notes")
+	embedCmd.Flags().BoolVar(&embedForce, "force", false, "Regenerate embeddings even when note content is unchanged")
 }
 
-func saveNoteEmbedding(cmd *cobra.Command, db *store.Store, client *llm.Client, model string, note store.Note) error {
-	text := noteEmbeddingText(note)
-	vector, err := client.CreateEmbedding(cmd.Context(), text)
+func saveNoteEmbedding(ctx context.Context, db *store.Store, client *llm.Client, model string, note store.Note) error {
+	text := store.NoteEmbeddingText(note)
+	vector, err := client.CreateEmbedding(ctx, text)
 	if err != nil {
 		return fmt.Errorf("create embedding for note #%d: %w", note.ID, err)
 	}
 
-	embedding, err := db.UpsertEmbedding(cmd.Context(), store.UpsertEmbeddingInput{
+	embedding, err := db.UpsertEmbedding(ctx, store.UpsertEmbeddingInput{
 		NoteID: note.ID,
 		Model:  model,
 		Text:   text,
@@ -102,27 +128,27 @@ func saveNoteEmbedding(cmd *cobra.Command, db *store.Store, client *llm.Client, 
 	return nil
 }
 
-func noteEmbeddingText(note store.Note) string {
-	var builder strings.Builder
-
-	builder.WriteString("Title: ")
-	builder.WriteString(note.Title)
-	builder.WriteString("\n")
-
-	if len(note.Tags) > 0 {
-		builder.WriteString("Tags: ")
-		builder.WriteString(strings.Join(note.Tags, ", "))
-		builder.WriteString("\n")
+func selectNotesForEmbedding(notes []store.Note, embeddings []store.NoteEmbedding, model string, force bool) ([]store.Note, int) {
+	if force {
+		return notes, 0
 	}
 
-	if strings.TrimSpace(note.Summary) != "" {
-		builder.WriteString("Summary: ")
-		builder.WriteString(note.Summary)
-		builder.WriteString("\n")
+	embeddingsByNote := make(map[int64]store.NoteEmbedding, len(embeddings))
+	for _, embedding := range embeddings {
+		if embedding.Model == model {
+			embeddingsByNote[embedding.NoteID] = embedding
+		}
 	}
 
-	builder.WriteString("Body:\n")
-	builder.WriteString(note.Body)
-
-	return builder.String()
+	pending := make([]store.Note, 0, len(notes))
+	skipped := 0
+	for _, note := range notes {
+		embedding, exists := embeddingsByNote[note.ID]
+		if exists && embedding.MatchesText(store.NoteEmbeddingText(note)) {
+			skipped++
+			continue
+		}
+		pending = append(pending, note)
+	}
+	return pending, skipped
 }

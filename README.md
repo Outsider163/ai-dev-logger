@@ -13,7 +13,7 @@
 - 为笔记生成 embedding 并保存到 SQLite
 - 使用自然语言进行本地向量相似度检索
 - 使用 AI 解读语义检索结果
-- 检查和批量重建笔记向量索引
+- 检查、增量更新和强制重建笔记向量索引
 
 ## 项目文档
 
@@ -205,16 +205,27 @@ ai-dev-logger search "SQLite" --limit 20
 
 ## 生成向量
 
-为一条笔记生成或更新向量：
+为一条笔记生成向量：
 
 ```powershell
 ai-dev-logger embed 1
 ```
 
-为全部笔记生成或重建向量：
+如果这条笔记使用当前模型生成的向量仍然有效，命令会直接跳过，不会调用 API。
+
+增量更新全部笔记向量：
 
 ```powershell
 ai-dev-logger embed --all
+```
+
+程序会使用 `content_hash` 比较当前笔记文本和生成向量时的文本，只为缺失或内容发生变化的笔记调用 embedding API。
+
+需要无条件重新生成时使用：
+
+```powershell
+ai-dev-logger embed --all --force
+ai-dev-logger embed 1 --force
 ```
 
 以下情况建议执行 `embed --all`：
@@ -222,9 +233,9 @@ ai-dev-logger embed --all
 - 第一次启用语义检索
 - 批量修改了笔记
 - 更换了 `embedding_model`
-- 状态检查显示存在缺少向量的笔记
+- 状态检查显示存在缺少或过期的向量
 
-批量生成会逐条调用 embedding API，可能产生等待时间和 API 费用。
+只有实际需要生成的向量才会调用 API。`--force` 会忽略哈希状态，可能产生更多等待时间和 API 费用。
 
 ## 检查索引状态
 
@@ -238,11 +249,13 @@ ai-dev-logger status
 notes: 12
 embedding model: your-embedding-model
 embeddings for current model: 10
+notes with current embeddings: 8
 notes missing embeddings: 2
+notes with stale embeddings: 2
 run: ai-dev-logger embed --all
 ```
 
-`status` 只读取本地数据库，不会调用模型 API。
+`status` 只读取本地数据库，不会调用模型 API。当前、缺失和过期数量之和等于笔记总数。
 
 ## 语义检索
 
@@ -387,8 +400,9 @@ show <id>                   查看完整笔记
 update <id>                 修改笔记
 delete <id> --yes           删除笔记
 search <query>              关键词搜索
-embed <id>                  生成一条笔记的向量
-embed --all                 重建全部笔记向量
+embed <id>                  增量生成一条笔记的向量
+embed --all                 增量更新全部笔记向量
+embed --all --force         强制重建全部笔记向量
 status                      检查向量索引状态
 semantic <query>            语义检索
 semantic <query> --explain  语义检索并生成 AI 解读

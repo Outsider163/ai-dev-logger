@@ -30,6 +30,16 @@ func TestEmbeddingVectorCodec(t *testing.T) {
 	}
 }
 
+func TestNoteEmbeddingMatchesText(t *testing.T) {
+	embedding := NoteEmbedding{ContentHash: hashText("same text")}
+	if !embedding.MatchesText("same text") {
+		t.Fatal("expected matching text to be current")
+	}
+	if embedding.MatchesText("changed text") {
+		t.Fatal("expected changed text to be stale")
+	}
+}
+
 func TestUpsertAndGetEmbedding(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "test.db"))
@@ -203,10 +213,11 @@ func TestGetEmbeddingStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.CreateNote(ctx, CreateNoteInput{Title: "Second", Body: "two"}); err != nil {
+	second, err := db.CreateNote(ctx, CreateNoteInput{Title: "Second", Body: "two"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.UpsertEmbedding(ctx, UpsertEmbeddingInput{NoteID: first.ID, Model: "model-a", Text: first.Body, Vector: []float64{0.1}}); err != nil {
+	if _, err := db.UpsertEmbedding(ctx, UpsertEmbeddingInput{NoteID: first.ID, Model: "model-a", Text: NoteEmbeddingText(first), Vector: []float64{0.1}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -214,7 +225,24 @@ func TestGetEmbeddingStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.NotesTotal != 2 || status.EmbeddingsTotal != 1 || status.MissingForModel != 1 {
+	if status.NotesTotal != 2 || status.EmbeddingsTotal != 1 || status.CurrentForModel != 1 || status.MissingForModel != 1 || status.StaleForModel != 0 {
 		t.Fatalf("unexpected status: %#v", status)
+	}
+
+	if _, err := db.UpsertEmbedding(ctx, UpsertEmbeddingInput{
+		NoteID: second.ID,
+		Model:  "model-a",
+		Text:   "text that does not match the note",
+		Vector: []float64{0.2},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err = db.GetEmbeddingStatus(ctx, "model-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.CurrentForModel != 1 || status.MissingForModel != 0 || status.StaleForModel != 1 {
+		t.Fatalf("unexpected stale status: %#v", status)
 	}
 }

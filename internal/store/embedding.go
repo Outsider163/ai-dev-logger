@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -23,6 +24,11 @@ type NoteEmbedding struct {
 	UpdatedAt   time.Time
 }
 
+// MatchesText reports whether the embedding was generated from text with the same content.
+func (e NoteEmbedding) MatchesText(text string) bool {
+	return e.ContentHash == hashText(text)
+}
+
 type UpsertEmbeddingInput struct {
 	NoteID int64
 	Model  string
@@ -34,7 +40,9 @@ type UpsertEmbeddingInput struct {
 type EmbeddingStatus struct {
 	NotesTotal      int
 	EmbeddingsTotal int
+	CurrentForModel int
 	MissingForModel int
+	StaleForModel   int
 	EmbeddingModel  string
 }
 
@@ -132,28 +140,70 @@ ORDER BY note_id ASC
 	return embeddings, rows.Err()
 }
 
-// GetEmbeddingStatus counts all embeddings and notes missing an embedding for one model.
+// GetEmbeddingStatus classifies each note's embedding for one model.
 func (s *Store) GetEmbeddingStatus(ctx context.Context, model string) (EmbeddingStatus, error) {
 	if model == "" {
 		return EmbeddingStatus{}, fmt.Errorf("embedding model is required")
 	}
 
-	status := EmbeddingStatus{EmbeddingModel: model}
-	if err := s.db.QueryRowContext(ctx, `
-SELECT
-	(SELECT COUNT(*) FROM notes),
-	(SELECT COUNT(*) FROM note_embeddings WHERE model = ?),
-	(
-		SELECT COUNT(*)
-		FROM notes AS n
-		LEFT JOIN note_embeddings AS e
-			ON e.note_id = n.id AND e.model = ?
-		WHERE e.note_id IS NULL
-	)
-`, model, model).Scan(&status.NotesTotal, &status.EmbeddingsTotal, &status.MissingForModel); err != nil {
+	notes, err := s.ListAllNotes(ctx)
+	if err != nil {
 		return EmbeddingStatus{}, err
 	}
+	embeddings, err := s.ListEmbeddings(ctx, model)
+	if err != nil {
+		return EmbeddingStatus{}, err
+	}
+
+	status := EmbeddingStatus{
+		NotesTotal:      len(notes),
+		EmbeddingsTotal: len(embeddings),
+		EmbeddingModel:  model,
+	}
+	embeddingsByNote := make(map[int64]NoteEmbedding, len(embeddings))
+	for _, embedding := range embeddings {
+		embeddingsByNote[embedding.NoteID] = embedding
+	}
+
+	for _, note := range notes {
+		embedding, exists := embeddingsByNote[note.ID]
+		if !exists {
+			status.MissingForModel++
+			continue
+		}
+		if !embedding.MatchesText(NoteEmbeddingText(note)) {
+			status.StaleForModel++
+			continue
+		}
+		status.CurrentForModel++
+	}
 	return status, nil
+}
+
+// NoteEmbeddingText builds the canonical text sent to the embeddings API.
+func NoteEmbeddingText(note Note) string {
+	var builder strings.Builder
+
+	builder.WriteString("Title: ")
+	builder.WriteString(note.Title)
+	builder.WriteString("\n")
+
+	if len(note.Tags) > 0 {
+		builder.WriteString("Tags: ")
+		builder.WriteString(strings.Join(note.Tags, ", "))
+		builder.WriteString("\n")
+	}
+
+	if strings.TrimSpace(note.Summary) != "" {
+		builder.WriteString("Summary: ")
+		builder.WriteString(note.Summary)
+		builder.WriteString("\n")
+	}
+
+	builder.WriteString("Body:\n")
+	builder.WriteString(note.Body)
+
+	return builder.String()
 }
 
 func (s *Store) DeleteEmbeddings(ctx context.Context, noteID int64) error {
