@@ -5,6 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+)
+
+const (
+	EnvAPIKey       = "AI_DEV_LOGGER_API_KEY"
+	OpenAIAPIKeyEnv = "OPENAI_API_KEY"
 )
 
 type Config struct {
@@ -82,4 +88,18 @@ func MaskSecret(value string) string {
 	}
 
 	return value[:4] + "..." + value[len(value)-4:]
+}
+
+// ResolveAPIKey returns the effective API key and a human-readable source.
+func ResolveAPIKey(configured string) (string, string) {
+	if value := strings.TrimSpace(os.Getenv(EnvAPIKey)); value != "" {
+		return value, EnvAPIKey
+	}
+	if value := strings.TrimSpace(configured); value != "" {
+		return value, "config file"
+	}
+	if value := strings.TrimSpace(os.Getenv(OpenAIAPIKeyEnv)); value != "" {
+		return value, OpenAIAPIKeyEnv
+	}
+	return "", ""
 }

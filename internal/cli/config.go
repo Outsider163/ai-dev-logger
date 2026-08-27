@@ -38,9 +38,10 @@ var configShowCmd = &cobra.Command{
 			return err
 		}
 
-		apiKey := appconfig.MaskSecret(cfg.LLM.APIKey)
+		effectiveAPIKey, apiKeySource := appconfig.ResolveAPIKey(cfg.LLM.APIKey)
+		apiKey := appconfig.MaskSecret(effectiveAPIKey)
 		if configShowReveal {
-			apiKey = cfg.LLM.APIKey
+			apiKey = effectiveAPIKey
 		}
 		if apiKey == "" {
 			apiKey = "(empty)"
@@ -48,6 +49,7 @@ var configShowCmd = &cobra.Command{
 
 		fmt.Printf("path: %s\n", configPath)
 		fmt.Printf("llm.api_key: %s\n", apiKey)
+		fmt.Printf("llm.api_key_source: %s\n", valueOrEmpty(apiKeySource))
 		fmt.Printf("llm.base_url: %s\n", valueOrEmpty(cfg.LLM.BaseURL))
 		fmt.Printf("llm.model: %s\n", valueOrEmpty(cfg.LLM.Model))
 		fmt.Printf("llm.embedding_model: %s\n", valueOrEmpty(cfg.LLM.EmbeddingModel))

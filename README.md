@@ -62,15 +62,36 @@ go run . --help
 ai-dev-logger config path
 ```
 
-配置 API：
+推荐先通过环境变量提供 API Key，避免把密钥写进配置文件：
+
+```powershell
+$env:AI_DEV_LOGGER_API_KEY="your-api-key"
+```
+
+这条命令只对当前 PowerShell 窗口生效。需要长期保存到当前 Windows 用户时执行：
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+  "AI_DEV_LOGGER_API_KEY",
+  "your-api-key",
+  "User"
+)
+```
+
+永久设置后需要重新打开 PowerShell。然后配置模型和 API 地址：
 
 ```powershell
 ai-dev-logger config set `
-  --api-key "your-api-key" `
   --base-url "https://api.openai.com/v1" `
   --model "your-chat-model" `
   --embedding-model "your-embedding-model"
 ```
+
+也可以使用 `config set --api-key "your-api-key"` 把密钥写入本地配置文件。程序读取密钥的优先级是：
+
+1. `AI_DEV_LOGGER_API_KEY` 环境变量
+2. 配置文件中的 `api_key`
+3. `OPENAI_API_KEY` 环境变量
 
 查看当前配置：
 
@@ -78,7 +99,7 @@ ai-dev-logger config set `
 ai-dev-logger config show
 ```
 
-`config show` 默认会隐藏 API Key 的中间部分。不要把包含真实密钥的配置文件提交到 Git 或发送给其他人。
+`config show` 会显示当前生效的密钥来源，并默认隐藏 API Key 的中间部分。不要把包含真实密钥的配置文件提交到 Git 或发送给其他人。
 
 配置项用途：
 
@@ -317,7 +338,7 @@ C:\Users\<用户名>\AppData\Roaming\ai-dev-logger\
 | 文件 | 内容 |
 | --- | --- |
 | `notes.db` | 笔记、标签、摘要和向量 |
-| `config.json` | API 地址、模型名称和 API Key |
+| `config.json` | API 地址、模型名称，以及可选的 API Key |
 
 可以使用全局参数临时指定其他位置：
 
@@ -345,8 +366,14 @@ Copy-Item `
 配置 API Key：
 
 ```powershell
-ai-dev-logger config set --api-key "your-api-key"
+$env:AI_DEV_LOGGER_API_KEY="your-api-key"
 ```
+
+也可以执行 `ai-dev-logger config set --api-key "your-api-key"` 保存到本地配置文件。
+
+### `status 429` 或临时 `status 5xx`
+
+程序会对限流和服务端临时故障自动重试 2 次，等待时间从 500 毫秒开始递增，单次最多等待 5 秒。如果 3 次请求仍然失败，命令会显示最终状态码和经过截断的错误内容。
 
 ### `llm model is empty`
 

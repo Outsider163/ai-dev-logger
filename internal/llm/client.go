@@ -1,11 +1,9 @@
 package llm
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -19,6 +17,9 @@ type Client struct {
 	model          string
 	embeddingModel string
 	httpClient     *http.Client
+	maxRetries     int
+	retryBaseDelay time.Duration
+	maxRetryDelay  time.Duration
 }
 
 type EnhanceNoteInput struct {
@@ -45,20 +46,24 @@ type SearchNote struct {
 }
 
 func NewClient(cfg appconfig.LLMConfig) *Client {
+	apiKey, _ := appconfig.ResolveAPIKey(cfg.APIKey)
 	return &Client{
-		apiKey:         strings.TrimSpace(cfg.APIKey),
+		apiKey:         apiKey,
 		baseURL:        strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/"),
 		model:          strings.TrimSpace(cfg.Model),
 		embeddingModel: strings.TrimSpace(cfg.EmbeddingModel),
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
+		maxRetries:     defaultMaxRetries,
+		retryBaseDelay: defaultRetryBaseDelay,
+		maxRetryDelay:  defaultMaxRetryDelay,
 	}
 }
 
 func (c *Client) EnhanceNote(ctx context.Context, input EnhanceNoteInput) (EnhancedNote, error) {
 	if c.apiKey == "" {
-		return EnhancedNote{}, fmt.Errorf("llm api key is empty, run config set --api-key")
+		return EnhancedNote{}, missingAPIKeyError()
 	}
 	if c.baseURL == "" {
 		return EnhancedNote{}, fmt.Errorf("llm base url is empty, run config set --base-url")
@@ -83,35 +88,9 @@ func (c *Client) EnhanceNote(ctx context.Context, input EnhanceNoteInput) (Enhan
 		ResponseFormat: map[string]string{"type": "json_object"},
 	}
 
-	data, err := json.Marshal(reqBody)
-	if err != nil {
-		return EnhancedNote{}, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(data))
-	if err != nil {
-		return EnhancedNote{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return EnhancedNote{}, err
-	}
-	defer resp.Body.Close()
-
-	respData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return EnhancedNote{}, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return EnhancedNote{}, fmt.Errorf("llm request failed: status %d: %s", resp.StatusCode, strings.TrimSpace(string(respData)))
-	}
-
 	var chatResp chatCompletionResponse
-	if err := json.Unmarshal(respData, &chatResp); err != nil {
-		return EnhancedNote{}, err
+	if err := c.postJSON(ctx, "/chat/completions", reqBody, &chatResp); err != nil {
+		return EnhancedNote{}, fmt.Errorf("enhance note: %w", err)
 	}
 	if len(chatResp.Choices) == 0 {
 		return EnhancedNote{}, fmt.Errorf("llm response has no choices")
@@ -126,7 +105,7 @@ func (c *Client) CreateEmbedding(ctx context.Context, text string) ([]float64, e
 		return nil, fmt.Errorf("embedding input is empty")
 	}
 	if c.apiKey == "" {
-		return nil, fmt.Errorf("llm api key is empty, run config set --api-key")
+		return nil, missingAPIKeyError()
 	}
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("llm base url is empty, run config set --base-url")
@@ -140,35 +119,9 @@ func (c *Client) CreateEmbedding(ctx context.Context, text string) ([]float64, e
 		Input: text,
 	}
 
-	data, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/embeddings", bytes.NewReader(data))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	respData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("embedding request failed: status %d: %s", resp.StatusCode, strings.TrimSpace(string(respData)))
-	}
-
 	var embeddingResp embeddingResponse
-	if err := json.Unmarshal(respData, &embeddingResp); err != nil {
-		return nil, err
+	if err := c.postJSON(ctx, "/embeddings", reqBody, &embeddingResp); err != nil {
+		return nil, fmt.Errorf("create embedding: %w", err)
 	}
 	if len(embeddingResp.Data) == 0 {
 		return nil, fmt.Errorf("embedding response has no data")
@@ -190,7 +143,7 @@ func (c *Client) ExplainSearch(ctx context.Context, query string, notes []Search
 		return "", fmt.Errorf("search notes are empty")
 	}
 	if c.apiKey == "" {
-		return "", fmt.Errorf("llm api key is empty, run config set --api-key")
+		return "", missingAPIKeyError()
 	}
 	if c.baseURL == "" {
 		return "", fmt.Errorf("llm base url is empty, run config set --base-url")
@@ -207,34 +160,9 @@ func (c *Client) ExplainSearch(ctx context.Context, query string, notes []Search
 		},
 		Temperature: 0.2,
 	}
-	data, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(data))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	respData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("llm request failed: status %d: %s", resp.StatusCode, strings.TrimSpace(string(respData)))
-	}
-
 	var chatResp chatCompletionResponse
-	if err := json.Unmarshal(respData, &chatResp); err != nil {
-		return "", err
+	if err := c.postJSON(ctx, "/chat/completions", reqBody, &chatResp); err != nil {
+		return "", fmt.Errorf("explain search: %w", err)
 	}
 	if len(chatResp.Choices) == 0 {
 		return "", fmt.Errorf("llm response has no choices")
@@ -245,6 +173,10 @@ func (c *Client) ExplainSearch(ctx context.Context, query string, notes []Search
 		return "", fmt.Errorf("llm explanation is empty")
 	}
 	return explanation, nil
+}
+
+func missingAPIKeyError() error {
+	return fmt.Errorf("llm api key is empty, set %s or run config set --api-key", appconfig.EnvAPIKey)
 }
 
 type chatCompletionRequest struct {
