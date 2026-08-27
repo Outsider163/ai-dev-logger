@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,8 @@ import (
 type Store struct {
 	db *sql.DB
 }
+
+const sqliteBusyTimeoutMilliseconds = 5000
 
 var ErrNoteNotFound = errors.New("note not found")
 
@@ -51,7 +54,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, err
 	}
@@ -69,35 +72,16 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-func (s *Store) migrate(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `
-CREATE TABLE IF NOT EXISTS notes (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
-	title TEXT NOT NULL,
-	body TEXT NOT NULL,
-	tags_json TEXT NOT NULL DEFAULT '[]',
-	summary TEXT NOT NULL DEFAULT '',
-	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL
-);
+func sqliteDSN(path string) string {
+	params := url.Values{}
+	params.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", sqliteBusyTimeoutMilliseconds))
+	params.Add("_pragma", "foreign_keys(ON)")
 
-CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at);
-
-CREATE TABLE IF NOT EXISTS note_embeddings (
-	note_id INTEGER NOT NULL,
-	model TEXT NOT NULL,
-	dimensions INTEGER NOT NULL,
-	vector_json TEXT NOT NULL,
-	content_hash TEXT NOT NULL,
-	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL,
-	PRIMARY KEY (note_id, model),
-	FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_note_embeddings_model ON note_embeddings(model);
-`)
-	return err
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + params.Encode()
 }
 
 func (s *Store) CreateNote(ctx context.Context, input CreateNoteInput) (Note, error) {
@@ -166,7 +150,15 @@ ORDER BY id ASC
 }
 
 func (s *Store) GetNote(ctx context.Context, id int64) (Note, error) {
-	row := s.db.QueryRowContext(ctx, `
+	return getNote(ctx, s.db, id)
+}
+
+type noteQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func getNote(ctx context.Context, querier noteQuerier, id int64) (Note, error) {
+	row := querier.QueryRowContext(ctx, `
 SELECT id, title, body, tags_json, summary, created_at, updated_at
 FROM notes
 WHERE id = ?
@@ -184,7 +176,13 @@ WHERE id = ?
 }
 
 func (s *Store) UpdateNote(ctx context.Context, input UpdateNoteInput) (Note, error) {
-	note, err := s.GetNote(ctx, input.ID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Note{}, err
+	}
+	defer tx.Rollback()
+
+	note, err := getNote(ctx, tx, input.ID)
 	if err != nil {
 		return Note{}, err
 	}
@@ -208,7 +206,7 @@ func (s *Store) UpdateNote(ctx context.Context, input UpdateNoteInput) (Note, er
 		return Note{}, err
 	}
 
-	result, err := s.db.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 UPDATE notes
 SET title = ?, body = ?, tags_json = ?, summary = ?, updated_at = ?
 WHERE id = ?
@@ -226,7 +224,10 @@ WHERE id = ?
 	}
 
 	// The note text changed, so all of its stored vectors are stale.
-	if err := s.DeleteEmbeddings(ctx, note.ID); err != nil {
+	if err := deleteEmbeddings(ctx, tx, note.ID); err != nil {
+		return Note{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return Note{}, err
 	}
 
@@ -249,11 +250,8 @@ WHERE id = ?
 	if affected == 0 {
 		return ErrNoteNotFound
 	}
-	// Keep vector search from seeing an embedding whose note was deleted.
-	if err := s.DeleteEmbeddings(ctx, id); err != nil {
-		return err
-	}
 
+	// SQLite removes related embeddings in the same statement through ON DELETE CASCADE.
 	return nil
 }
 

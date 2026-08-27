@@ -157,7 +157,15 @@ SELECT
 }
 
 func (s *Store) DeleteEmbeddings(ctx context.Context, noteID int64) error {
-	_, err := s.db.ExecContext(ctx, `
+	return deleteEmbeddings(ctx, s.db, noteID)
+}
+
+type embeddingExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func deleteEmbeddings(ctx context.Context, execer embeddingExecer, noteID int64) error {
+	_, err := execer.ExecContext(ctx, `
 DELETE FROM note_embeddings
 WHERE note_id = ?
 `, noteID)
