@@ -1,5 +1,7 @@
 # ai-dev-logger
 
+[![CI](https://github.com/Outsider163/ai-dev-logger/actions/workflows/ci.yml/badge.svg)](https://github.com/Outsider163/ai-dev-logger/actions/workflows/ci.yml)
+
 `ai-dev-logger` 是一个面向程序员的本地 CLI 开发日志助手，用来记录学习笔记、代码片段和踩坑经验。
 
 数据保存在本地 SQLite 数据库中。你可以使用关键词搜索，也可以调用兼容 OpenAI API 的模型完成笔记润色、标签生成、摘要生成、语义检索和检索结果解读。
@@ -441,13 +443,24 @@ ai-dev-logger embed --all
 
 ## 开发检查
 
-修改代码后运行：
+修改代码后，可以在项目根目录运行与云端 CI 等价的一键检查：
 
 ```powershell
-$env:GOTOOLCHAIN='local'
-go test ./...
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check.ps1
+```
+
+脚本会依次检查 Go 格式、依赖文件、单元测试、静态分析和构建，测试可执行文件保存在被 Git 忽略的 `.tmp\ci` 目录。
+
+仓库中的 `.github/workflows/ci.yml` 会在每次 push、Pull Request 和手工触发时，在 GitHub 的 Ubuntu 环境执行同类检查。测试使用本地临时 HTTP 服务，不需要把真实 API Key 配置到 GitHub Secrets。
+
+也可以分别执行：
+
+```powershell
+go mod download
+go mod tidy
+go test ./... -count=1
 go vet ./...
-go build -o dist\ai-dev-logger.exe .
+go build -trimpath -o dist\ai-dev-logger.exe .
 ```
 
 ## 命令速查
