@@ -85,9 +85,11 @@ var addCmd = &cobra.Command{
 
 		fmt.Printf("saved note #%d\n", note.ID)
 		if addEmbed {
-			if err := saveNoteEmbedding(cmd.Context(), db, llm.NewClient(cfg.LLM), cfg.LLM.EmbeddingModel, note); err != nil {
+			embedding, err := saveNoteEmbedding(cmd.Context(), db, llm.NewClient(cfg.LLM), cfg.LLM.EmbeddingModel, note)
+			if err != nil {
 				return fmt.Errorf("note #%d was saved, but its embedding failed: %w", note.ID, err)
 			}
+			printSavedEmbedding(cmd.OutOrStdout(), embedding)
 		}
 		return nil
 	},

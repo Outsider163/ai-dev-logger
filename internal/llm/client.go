@@ -104,14 +104,8 @@ func (c *Client) CreateEmbedding(ctx context.Context, text string) ([]float64, e
 	if text == "" {
 		return nil, fmt.Errorf("embedding input is empty")
 	}
-	if c.apiKey == "" {
-		return nil, missingAPIKeyError()
-	}
-	if c.baseURL == "" {
-		return nil, fmt.Errorf("llm base url is empty, run config set --base-url")
-	}
-	if c.embeddingModel == "" {
-		return nil, fmt.Errorf("llm embedding model is empty, run config set --embedding-model")
+	if err := c.ValidateEmbeddingConfig(); err != nil {
+		return nil, err
 	}
 
 	reqBody := embeddingRequest{
@@ -131,6 +125,20 @@ func (c *Client) CreateEmbedding(ctx context.Context, text string) ([]float64, e
 	}
 
 	return embeddingResp.Data[0].Embedding, nil
+}
+
+// ValidateEmbeddingConfig checks batch-wide settings before API work begins.
+func (c *Client) ValidateEmbeddingConfig() error {
+	if c.apiKey == "" {
+		return missingAPIKeyError()
+	}
+	if c.baseURL == "" {
+		return fmt.Errorf("llm base url is empty, run config set --base-url")
+	}
+	if c.embeddingModel == "" {
+		return fmt.Errorf("llm embedding model is empty, run config set --embedding-model")
+	}
+	return nil
 }
 
 // ExplainSearch explains how the retrieved notes relate to a user's question.

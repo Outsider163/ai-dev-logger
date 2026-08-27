@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -50,7 +51,7 @@ var embedCmd = &cobra.Command{
 				return err
 			}
 			if len(notes) == 0 {
-				fmt.Println("no notes to embed")
+				cmd.Println("no notes to embed")
 				return nil
 			}
 		} else {
@@ -79,23 +80,45 @@ var embedCmd = &cobra.Command{
 		pending, skipped := selectNotesForEmbedding(notes, existing, model, embedForce)
 		if len(pending) == 0 {
 			if embedAll {
-				fmt.Printf("embedding index is up to date: 0 generated, %d skipped\n", skipped)
+				cmd.Printf("embedding index is up to date: 0 generated, %d skipped, 0 failed\n", skipped)
 			} else {
-				fmt.Printf("embedding for note #%d is already up to date\n", notes[0].ID)
+				cmd.Printf("embedding for note #%d is already up to date\n", notes[0].ID)
 			}
 			return nil
 		}
 
 		client := llm.NewClient(cfg.LLM)
-		for _, note := range pending {
-			if err := saveNoteEmbedding(cmd.Context(), db, client, model, note); err != nil {
+		if err := client.ValidateEmbeddingConfig(); err != nil {
+			return err
+		}
+		if !embedAll {
+			embedding, err := saveNoteEmbedding(cmd.Context(), db, client, model, pending[0])
+			if err != nil {
 				return err
 			}
+			printSavedEmbedding(cmd.OutOrStdout(), embedding)
+			return nil
 		}
-		if embedAll {
-			fmt.Printf("embedding index updated: %d generated, %d skipped\n", len(pending), skipped)
+
+		result, batchErr := saveEmbeddingBatch(
+			cmd.Context(),
+			db,
+			client,
+			model,
+			pending,
+			cmd.OutOrStdout(),
+			cmd.ErrOrStderr(),
+		)
+		cmd.Printf(
+			"embedding index update finished: %d generated, %d skipped, %d failed\n",
+			result.Generated,
+			skipped,
+			len(result.Failures),
+		)
+		if batchErr != nil {
+			return batchErr
 		}
-		return nil
+		return result.failureError()
 	},
 }
 
@@ -107,11 +130,21 @@ func init() {
 	embedCmd.Flags().BoolVar(&embedForce, "force", false, "Regenerate embeddings even when note content is unchanged")
 }
 
-func saveNoteEmbedding(ctx context.Context, db *store.Store, client *llm.Client, model string, note store.Note) error {
+type embeddingFailure struct {
+	NoteID int64
+	Err    error
+}
+
+type embeddingBatchResult struct {
+	Generated int
+	Failures  []embeddingFailure
+}
+
+func saveNoteEmbedding(ctx context.Context, db *store.Store, client *llm.Client, model string, note store.Note) (store.NoteEmbedding, error) {
 	text := store.NoteEmbeddingText(note)
 	vector, err := client.CreateEmbedding(ctx, text)
 	if err != nil {
-		return fmt.Errorf("create embedding for note #%d: %w", note.ID, err)
+		return store.NoteEmbedding{}, fmt.Errorf("create embedding for note #%d: %w", note.ID, err)
 	}
 
 	embedding, err := db.UpsertEmbedding(ctx, store.UpsertEmbeddingInput{
@@ -121,11 +154,78 @@ func saveNoteEmbedding(ctx context.Context, db *store.Store, client *llm.Client,
 		Vector: vector,
 	})
 	if err != nil {
-		return err
+		return store.NoteEmbedding{}, fmt.Errorf("store embedding for note #%d: %w", note.ID, err)
+	}
+	return embedding, nil
+}
+
+func saveEmbeddingBatch(
+	ctx context.Context,
+	db *store.Store,
+	client *llm.Client,
+	model string,
+	notes []store.Note,
+	stdout io.Writer,
+	stderr io.Writer,
+) (embeddingBatchResult, error) {
+	result := embeddingBatchResult{Failures: make([]embeddingFailure, 0)}
+	for index, note := range notes {
+		current := index + 1
+		fmt.Fprintf(stdout, "[%d/%d] embedding note #%d...\n", current, len(notes), note.ID)
+
+		embedding, err := saveNoteEmbedding(ctx, db, client, model, note)
+		if err != nil {
+			result.Failures = append(result.Failures, embeddingFailure{NoteID: note.ID, Err: err})
+			fmt.Fprintf(stderr, "[%d/%d] failed note #%d: %v\n", current, len(notes), note.ID, err)
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return result, err
+			}
+			continue
+		}
+
+		result.Generated++
+		fmt.Fprintf(
+			stdout,
+			"[%d/%d] saved embedding for note #%d using %s (%d dimensions)\n",
+			current,
+			len(notes),
+			embedding.NoteID,
+			embedding.Model,
+			embedding.Dimensions,
+		)
+	}
+	return result, nil
+}
+
+func (r embeddingBatchResult) failureError() error {
+	if len(r.Failures) == 0 {
+		return nil
 	}
 
-	fmt.Printf("saved embedding for note #%d using %s (%d dimensions)\n", embedding.NoteID, embedding.Model, embedding.Dimensions)
-	return nil
+	noteIDs := make([]string, 0, len(r.Failures))
+	for _, failure := range r.Failures {
+		noteIDs = append(noteIDs, fmt.Sprintf("#%d", failure.NoteID))
+	}
+	noteWord := "notes"
+	if len(r.Failures) == 1 {
+		noteWord = "note"
+	}
+	return fmt.Errorf(
+		"%d %s failed to embed (%s); fix the reported errors and rerun embed --all",
+		len(r.Failures),
+		noteWord,
+		strings.Join(noteIDs, ", "),
+	)
+}
+
+func printSavedEmbedding(writer io.Writer, embedding store.NoteEmbedding) {
+	fmt.Fprintf(
+		writer,
+		"saved embedding for note #%d using %s (%d dimensions)\n",
+		embedding.NoteID,
+		embedding.Model,
+		embedding.Dimensions,
+	)
 }
 
 func selectNotesForEmbedding(notes []store.Note, embeddings []store.NoteEmbedding, model string, force bool) ([]store.Note, int) {

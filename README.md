@@ -242,6 +242,20 @@ ai-dev-logger embed --all
 
 程序会使用 `content_hash` 比较当前笔记文本和生成向量时的文本，只为缺失或内容发生变化的笔记调用 embedding API。
 
+批量执行时会显示当前进度：
+
+```text
+[1/3] embedding note #1...
+[1/3] saved embedding for note #1 using your-embedding-model (1536 dimensions)
+[2/3] embedding note #2...
+[2/3] failed note #2: ...
+[3/3] embedding note #3...
+[3/3] saved embedding for note #3 using your-embedding-model (1536 dimensions)
+embedding index update finished: 2 generated, 0 skipped, 1 failed
+```
+
+单条笔记失败不会阻止后面的笔记继续处理。命令结束时仍会返回失败状态并列出失败的笔记 ID，方便脚本发现批次没有完全成功。修复网络、配置或笔记内容问题后再次运行 `embed --all`，已成功且内容未变化的笔记会被跳过，只重试缺失的部分。用户主动取消命令时，程序会立即停止，不会继续处理后面的笔记。
+
 需要无条件重新生成时使用：
 
 ```powershell
@@ -406,6 +420,16 @@ ai-dev-logger embed --all
 ```powershell
 ai-dev-logger embed N
 ```
+
+### `N notes failed to embed`
+
+批量生成过程中有部分笔记失败，成功的向量已经保存在数据库中。先查看各条 `failed note #N` 后面的具体原因，再重新执行：
+
+```powershell
+ai-dev-logger embed --all
+```
+
+增量索引会跳过已经成功的笔记。
 
 ### 更换 embedding 模型后搜索结果为空
 
