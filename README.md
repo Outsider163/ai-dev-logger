@@ -20,6 +20,7 @@
 - 将全部笔记导出为适合阅读的 Markdown 或结构化 JSON
 - 严格校验并事务化导入 JSON，支持预演和重复策略
 - 安全生成包含笔记和向量的 SQLite 快照，自动检查完整性并计算 SHA-256
+- 预演并恢复完整 SQLite 备份，恢复前自动保留当前数据库
 
 ## 项目文档
 
@@ -522,6 +523,44 @@ ai-dev-logger --db .\notes-backup.db list --limit 100
 
 `backup` 是包含向量的完整数据库备份；`export` 是只包含笔记内容的逻辑导出，适合阅读、跨工具处理和后续迁移，两者用途不同。
 
+## 恢复备份
+
+恢复会替换目标数据库中的全部笔记和向量。先退出其他正在运行的写命令，然后执行预演：
+
+```powershell
+ai-dev-logger restore --input .\notes-backup.db --dry-run
+```
+
+预演会只读检查备份的 SQLite 完整性、外键、项目结构和版本，显示来源与当前目标的笔记、向量数量，并给出计划创建的恢复前安全备份路径。它不会修改任何文件。
+
+确认信息无误后，显式执行：
+
+```powershell
+ai-dev-logger restore --input .\notes-backup.db --yes
+```
+
+目标数据库存在时，程序会先创建类似下面的完整安全备份：
+
+```text
+notes.pre-restore-20260827T123456Z.db
+```
+
+只有安全备份生成、完整性检查和 SHA-256 计算全部成功后，程序才会使用 SQLite Online Backup API 恢复目标数据库。来源文件以只读模式打开，并在恢复前后复核大小和 SHA-256，防止验证期间被其他程序改写；恢复完成后，程序会重新检查项目结构、笔记数量、向量数量和数据库完整性。
+
+恢复其他数据库位置时，把全局 `--db` 放在子命令前面：
+
+```powershell
+ai-dev-logger `
+  --db D:\notes\work.db `
+  restore --input D:\backups\work-backup.db --dry-run
+
+ai-dev-logger `
+  --db D:\notes\work.db `
+  restore --input D:\backups\work-backup.db --yes
+```
+
+如果目标数据库原本不存在，程序会创建它，此时不需要恢复前安全备份。恢复不读取 `config.json`，不会改变模型配置或 API Key，也不会调用 LLM API。
+
 ## 常见问题
 
 ### `llm api key is empty`
@@ -653,6 +692,8 @@ export --format json -o notes.json    导出 JSON
 import -i notes.json --dry-run        预演 JSON 导入
 import -i notes.json                  事务化导入 JSON
 backup -o notes-backup.db             创建并校验完整数据库备份
+restore -i notes-backup.db --dry-run  预演完整数据库恢复
+restore -i notes-backup.db --yes      自动备份当前库并执行恢复
 semantic <query>            语义检索
 semantic <query> --min-score 0.65  过滤低相似度结果
 semantic <query> --explain  语义检索并生成 AI 解读

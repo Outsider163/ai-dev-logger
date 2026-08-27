@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -63,7 +62,7 @@ func VerifyDatabase(ctx context.Context, path string) error {
 		return fmt.Errorf("database path is a directory: %s", path)
 	}
 
-	db, err := sql.Open("sqlite", sqliteDSN(path))
+	db, err := openReadOnlyDatabase(path)
 	if err != nil {
 		return fmt.Errorf("open database for integrity check: %w", err)
 	}
