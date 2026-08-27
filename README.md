@@ -21,6 +21,8 @@
 - 严格校验并事务化导入 JSON，支持预演和重复策略
 - 安全生成包含笔记和向量的 SQLite 快照，自动检查完整性并计算 SHA-256
 - 预演并恢复完整 SQLite 备份，恢复前自动保留当前数据库
+- 为 Bash、Zsh、Fish 和 PowerShell 生成命令补全脚本
+- 提供默认不修改 PATH 和 PowerShell 配置的 Windows 安装脚本
 
 ## 项目文档
 
@@ -33,7 +35,7 @@
 - 普通笔记与关键词搜索不需要 API Key
 - AI 和语义检索功能需要兼容 OpenAI API 的聊天模型与 embedding 模型
 
-## 构建
+## 安装与构建
 
 ### 下载发布版本
 
@@ -42,6 +44,14 @@
 ```text
 ai-dev-logger_vX.Y.Z_windows_amd64.zip
 checksums.txt
+```
+
+ZIP 解压后包含：
+
+```text
+ai-dev-logger.exe  主程序
+install.ps1        Windows 用户级安装脚本
+README.md          使用指南
 ```
 
 解压后可以查看版本：
@@ -60,6 +70,50 @@ Get-FileHash `
 ```
 
 将输出哈希与 `checksums.txt` 中对应文件的哈希比较。
+
+### 使用 Windows 安装脚本
+
+最稳妥的默认安装方式：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\install.ps1
+```
+
+默认安装到当前用户目录：
+
+```text
+%LOCALAPPDATA%\Programs\ai-dev-logger
+```
+
+默认模式只安装 `ai-dev-logger.exe` 并生成 `ai-dev-logger-completion.ps1`，不会修改用户 `PATH`，也不会修改 PowerShell 配置文件。
+
+第一次安装时，如果希望同时加入当前用户 `PATH` 并为后续 PowerShell 窗口启用 Tab 补全，可以明确传入两个开关：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\install.ps1 `
+  -AddToPath `
+  -AddCompletionToProfile
+```
+
+升级到新版本时添加 `-Force`：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\install.ps1 `
+  -Force `
+  -AddToPath `
+  -AddCompletionToProfile
+```
+
+安装器只修改当前 Windows 用户的配置，不需要管理员权限。通过单独的 `powershell -File` 进程执行后，请重新打开 PowerShell，让新的 `PATH` 和补全配置生效。
+
+未加入 `PATH` 时，可以直接运行：
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\ai-dev-logger\ai-dev-logger.exe" --help
+```
 
 ### 从源码构建
 
@@ -89,6 +143,38 @@ go run . --help
 
 ```powershell
 .\dist\ai-dev-logger.exe
+```
+
+## 命令补全
+
+`completion` 命令可以为四种 Shell 生成补全脚本：
+
+```powershell
+ai-dev-logger completion bash
+ai-dev-logger completion zsh
+ai-dev-logger completion fish
+ai-dev-logger completion powershell
+```
+
+安装器使用的就是 `completion powershell`。不使用安装器时，可以在当前 PowerShell 窗口手工加载：
+
+```powershell
+$completionFile = Join-Path $HOME 'ai-dev-logger-completion.ps1'
+ai-dev-logger completion powershell |
+  Out-File -LiteralPath $completionFile -Encoding utf8
+. $completionFile
+```
+
+现在输入下面的内容并按 Tab，就会看到子命令建议：
+
+```powershell
+ai-dev-logger sem<Tab>
+```
+
+`--no-descriptions` 可以关闭补全候选中的命令说明：
+
+```powershell
+ai-dev-logger completion powershell --no-descriptions
 ```
 
 ## 配置模型
@@ -635,7 +721,7 @@ ai-dev-logger embed --all
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check.ps1
 ```
 
-脚本会依次检查 Go 格式、依赖文件、单元测试、静态分析和构建，测试可执行文件保存在被 Git 忽略的 `.tmp\ci` 目录。
+脚本会依次检查 Go 格式、依赖文件、单元测试、静态分析和构建，并在临时目录演练安装器与 PowerShell 补全配置。测试文件保存在被 Git 忽略的 `.tmp\ci` 目录，不会修改真实用户 PATH 或 PowerShell 配置。
 
 仓库中的 `.github/workflows/ci.yml` 会在每次 push、Pull Request 和手工触发时，在 GitHub 的 Ubuntu 环境执行同类检查。测试使用本地临时 HTTP 服务，不需要把真实 API Key 配置到 GitHub Secrets。
 
@@ -659,7 +745,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -Version v1.1.0
 ```
 
-脚本要求 Git 工作区干净，并在 `dist` 中生成 Windows ZIP 和 `checksums.txt`。
+脚本要求 Git 工作区干净，并在 `dist` 中生成 Windows ZIP 和 `checksums.txt`。ZIP 内会校验 `ai-dev-logger.exe`、`install.ps1` 和 `README.md` 三个必需文件。
 
 确认主分支已经推送且 CI 通过后，维护者可以创建并推送版本标签：
 
@@ -699,5 +785,6 @@ semantic <query> --min-score 0.65  过滤低相似度结果
 semantic <query> --explain  语义检索并生成 AI 解读
 config path/show/set        管理配置
 version                     查看完整构建版本信息
+completion powershell       生成 PowerShell Tab 补全脚本
 --version                   快速查看版本号
 ```

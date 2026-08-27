@@ -36,6 +36,7 @@ func init() {
 
 	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(backupCmd)
+	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(deleteCmd)
 	rootCmd.AddCommand(doctorCmd)

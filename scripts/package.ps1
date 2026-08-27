@@ -23,6 +23,7 @@ $distDir = Join-Path $repoRoot 'dist'
 $packageDir = Join-Path $distDir 'package'
 $binaryPath = Join-Path $packageDir 'ai-dev-logger.exe'
 $readmePath = Join-Path $packageDir 'README.md'
+$installerPath = Join-Path $packageDir 'install.ps1'
 $archiveName = "ai-dev-logger_${Version}_windows_amd64.zip"
 $archivePath = Join-Path $distDir $archiveName
 $checksumPath = Join-Path $distDir 'checksums.txt'
@@ -60,7 +61,22 @@ try {
     }
 
     Copy-Item -LiteralPath (Join-Path $repoRoot 'README.md') -Destination $readmePath -Force
-    Compress-Archive -LiteralPath $binaryPath, $readmePath -DestinationPath $archivePath -Force
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'scripts\install.ps1') -Destination $installerPath -Force
+    Compress-Archive -LiteralPath $binaryPath, $readmePath, $installerPath -DestinationPath $archivePath -Force
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($archivePath)
+    try {
+        $archiveEntries = @($archive.Entries | ForEach-Object { $_.FullName })
+        foreach ($requiredEntry in @('ai-dev-logger.exe', 'README.md', 'install.ps1')) {
+            if ($archiveEntries -notcontains $requiredEntry) {
+                throw "Release archive is missing required file: $requiredEntry"
+            }
+        }
+    }
+    finally {
+        $archive.Dispose()
+    }
 
     $hash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
     $checksumLine = "$hash  $archiveName"
