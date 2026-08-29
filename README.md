@@ -24,10 +24,6 @@
 - 为 Bash、Zsh、Fish 和 PowerShell 生成命令补全脚本
 - 提供默认不修改 PATH 和 PowerShell 配置的 Windows 安装脚本
 
-## 项目文档
-
-本文件是面向使用者的正式使用指南。源码学习、完整调用链路、阶段笔记和面试资料统一收录在 [`docs/README.md`](docs/README.md) 中。
-
 ## 环境要求
 
 - Windows 10 或 Windows 11

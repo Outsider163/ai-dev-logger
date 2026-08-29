@@ -6,3 +6,4 @@
 *.db-wal
 bin/
 dist/
+docs/
