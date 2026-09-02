@@ -22,7 +22,7 @@
 - 安全生成包含笔记和向量的 SQLite 快照，自动检查完整性并计算 SHA-256
 - 预演并恢复完整 SQLite 备份，恢复前自动保留当前数据库
 - 为 Bash、Zsh、Fish 和 PowerShell 生成命令补全脚本
-- 提供默认不修改 PATH 和 PowerShell 配置的 Windows 安装脚本
+- 提供带 SHA-256 校验的一键在线安装，以及默认不修改 PATH 的离线安装
 
 ## 环境要求
 
@@ -33,7 +33,30 @@
 
 ## 安装与构建
 
-### 下载发布版本
+### 一条命令安装（推荐）
+
+在 Windows PowerShell 中执行：
+
+```powershell
+irm https://github.com/Outsider163/ai-dev-logger/releases/latest/download/install-online.ps1 | iex
+```
+
+安装器会自动查找最新正式版本、下载 Windows 压缩包、核对 `checksums.txt` 中的 SHA-256，并安装到当前用户目录：
+
+```text
+%LOCALAPPDATA%\Programs\ai-dev-logger
+```
+
+它会自动把安装目录加入当前用户 `PATH`，不需要管理员权限，也不会修改 PowerShell 配置文件。安装完成后可以直接运行：
+
+```powershell
+adl --version
+adl setup
+```
+
+以后再次执行同一条在线安装命令，就是升级到最新正式版本。
+
+### 手工下载发布版本
 
 发布后的 Windows 压缩包位于 [GitHub Releases](https://github.com/Outsider163/ai-dev-logger/releases)。下载：
 
@@ -105,6 +128,21 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 
 安装器只修改当前 Windows 用户的配置，不需要管理员权限。通过单独的 `powershell -File` 进程执行后，请重新打开 PowerShell，让新的 `PATH` 和补全配置生效。
 
+安装器会同时提供两个完全等价的命令：
+
+```powershell
+ai-dev-logger --help
+adl --help
+```
+
+`adl` 是方便日常记录的短命令，所有原有子命令和参数都可以直接使用，例如：
+
+```powershell
+adl add --title "Go map 并发问题" --body "使用 sync.Mutex 保护共享 map。"
+adl list
+adl search "mutex"
+```
+
 未加入 `PATH` 时，可以直接运行：
 
 ```powershell
@@ -173,7 +211,66 @@ ai-dev-logger sem<Tab>
 ai-dev-logger completion powershell --no-descriptions
 ```
 
+## 交互模式
+
+安装后直接运行短命令，不带任何参数：
+
+```powershell
+adl
+```
+
+进入交互模式后，直接输入一行文字并回车就会保存到本地 SQLite。行尾使用 `#标签` 可以同时添加标签：
+
+```text
+adl> 今天解决了 Go map 并发写入问题，使用 sync.Mutex #go #并发
+saved note #1: 今天解决了 Go map 并发写入问题，使用 sync.Mutex
+tags: go, 并发
+```
+
+交互模式支持以下命令：
+
+```text
+/list [数量]  查看最近笔记，默认 10 条
+/find <内容>  搜索标题、正文和标签
+/show <编号>  查看一条完整笔记
+/help         查看交互命令
+/exit         退出
+```
+
+直接输入笔记默认只保存原文，不会调用 AI，也不会产生模型费用。原来的 `ai-dev-logger add`、`list`、`search` 等命令继续可用。
+
+不进入交互模式时，也可以在普通终端中一句话保存：
+
+```powershell
+adl "今天解决了 SQLite 锁等待问题 #sqlite #database"
+```
+
+程序会把整句话保存为正文、自动生成简短标题，并提取行内标签。没有标签时可以省略引号，但建议始终给整条笔记加上引号；PowerShell 会把未被引号保护的 `#` 及其后内容当作注释。
+
 ## 配置模型
+
+### DeepSeek 首次配置向导
+
+使用 DeepSeek 时推荐直接运行：
+
+```powershell
+adl setup
+```
+
+向导会隐藏 API Key 输入，并依次确认 API 地址和聊天模型。默认值为：
+
+```text
+API 地址：https://api.deepseek.com
+聊天模型：deepseek-v4-flash
+```
+
+向导会先测试一次聊天接口，连接成功后才写入配置文件。连接失败不会覆盖原有配置。确实需要离线保存、稍后再测试时可以使用：
+
+```powershell
+adl setup --skip-test
+```
+
+官方 DeepSeek API 当前不提供 embedding 接口，因此该向导只配置笔记润色、摘要、标签和搜索结果解读使用的聊天模型。关键词搜索仍然可以正常使用；语义检索需要后续单独配置支持 embedding 的服务。
 
 查看配置文件路径：
 
@@ -738,24 +835,25 @@ go build -trimpath -o dist\ai-dev-logger.exe .
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\package.ps1 `
-  -Version v1.1.0
+  -Version v1.2.0
 ```
 
-脚本要求 Git 工作区干净，并在 `dist` 中生成 Windows ZIP 和 `checksums.txt`。ZIP 内会校验 `ai-dev-logger.exe`、`install.ps1` 和 `README.md` 三个必需文件。
+脚本要求 Git 工作区干净，并在 `dist` 中生成 Windows ZIP、`install-online.ps1` 和 `checksums.txt`。ZIP 内会校验 `ai-dev-logger.exe`、`install.ps1` 和 `README.md` 三个必需文件，校验文件同时记录 ZIP 与在线安装器的 SHA-256。
 
 确认主分支已经推送且 CI 通过后，维护者可以创建并推送版本标签：
 
 ```powershell
-git tag -a v1.1.0 -m "Release v1.1.0"
-git push origin v1.1.0
+git tag -a v1.2.0 -m "Release v1.2.0"
+git push origin v1.2.0
 ```
 
-`.github/workflows/release.yml` 会验证标签、运行质量检查、构建 Windows 二进制、生成 SHA-256 校验文件，并通过 GitHub 自动生成版本说明。预发布标签如 `v1.2.0-rc.1` 会自动创建为 Pre-release。
+`.github/workflows/release.yml` 会验证标签、运行质量检查、构建 Windows 二进制、上传固定名称的一键安装器、生成 SHA-256 校验文件，并通过 GitHub 自动生成版本说明。预发布标签如 `v1.2.0-rc.1` 会自动创建为 Pre-release。
 
 ## 命令速查
 
 ```text
 add                         新增笔记
+adl <text>                  一句话快速保存本地笔记
 add --ai                    新增并使用 AI 整理
 add --embed                 新增并生成向量
 list                        列出最近笔记
@@ -779,6 +877,7 @@ restore -i notes-backup.db --yes      自动备份当前库并执行恢复
 semantic <query>            语义检索
 semantic <query> --min-score 0.65  过滤低相似度结果
 semantic <query> --explain  语义检索并生成 AI 解读
+setup                       交互配置并测试 DeepSeek 聊天接口
 config path/show/set        管理配置
 version                     查看完整构建版本信息
 completion powershell       生成 PowerShell Tab 补全脚本

@@ -79,10 +79,11 @@ jobs:
           GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$linker_flags" -o dist/package/ai-dev-logger.exe .
           cp README.md dist/package/README.md
           cp scripts/install.ps1 dist/package/install.ps1
+          cp scripts/install-online.ps1 dist/install-online.ps1
 
           archive_name="ai-dev-logger_${VERSION}_windows_amd64.zip"
           (cd dist/package && zip -q "../${archive_name}" ai-dev-logger.exe README.md install.ps1)
-          (cd dist && sha256sum "$archive_name" > checksums.txt)
+          (cd dist && sha256sum "$archive_name" install-online.ps1 > checksums.txt)
 
           archive_entries="$(unzip -Z1 "dist/$archive_name")"
           for required_entry in ai-dev-logger.exe README.md install.ps1; do
@@ -109,6 +110,7 @@ jobs:
 
           gh release create "$VERSION" \
             "dist/${ARCHIVE_NAME}#Windows amd64" \
+            "dist/install-online.ps1#One-command Windows installer" \
             "dist/checksums.txt#SHA-256 checksums" \
             --verify-tag \
             --generate-notes \

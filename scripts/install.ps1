@@ -187,6 +187,7 @@ if (-not (Test-Path -LiteralPath $BinaryPath -PathType Leaf)) {
 $sourcePath = (Resolve-Path -LiteralPath $BinaryPath).Path
 $resolvedInstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 $targetPath = Join-Path $resolvedInstallDir 'ai-dev-logger.exe'
+$aliasPath = Join-Path $resolvedInstallDir 'adl.exe'
 $completionPath = Join-Path $resolvedInstallDir 'ai-dev-logger-completion.ps1'
 $sameBinaryPath = [string]::Equals($sourcePath, $targetPath, [StringComparison]::OrdinalIgnoreCase)
 
@@ -195,6 +196,9 @@ if ((Test-Path -LiteralPath $targetPath) -and -not (Test-Path -LiteralPath $targ
 }
 if ((Test-Path -LiteralPath $targetPath -PathType Leaf) -and -not $Force -and -not $sameBinaryPath) {
     throw "ai-dev-logger is already installed at $targetPath; rerun with -Force to upgrade it"
+}
+if ((Test-Path -LiteralPath $aliasPath) -and -not (Test-Path -LiteralPath $aliasPath -PathType Leaf)) {
+    throw "Short command target is not a file: $aliasPath"
 }
 
 New-Item -ItemType Directory -Force -Path $resolvedInstallDir | Out-Null
@@ -212,10 +216,27 @@ if (-not $sameBinaryPath) {
     }
 }
 
+$stagedAliasPath = "$aliasPath.installing"
+try {
+    Copy-Item -LiteralPath $targetPath -Destination $stagedAliasPath -Force
+    Move-Item -LiteralPath $stagedAliasPath -Destination $aliasPath -Force
+}
+finally {
+    if (Test-Path -LiteralPath $stagedAliasPath) {
+        Remove-Item -LiteralPath $stagedAliasPath -Force
+    }
+}
+
 $versionOutput = @(& $targetPath --version)
 Assert-LastExitCode 'Installed binary verification'
 if ($versionOutput.Count -eq 0) {
     throw 'Installed binary returned no version information'
+}
+
+$aliasVersionOutput = @(& $aliasPath --version)
+Assert-LastExitCode 'Short command verification'
+if ($aliasVersionOutput.Count -eq 0) {
+    throw 'Short command returned no version information'
 }
 
 $completionLines = @(& $targetPath completion powershell)
@@ -224,10 +245,12 @@ if ($completionLines.Count -eq 0) {
     throw 'PowerShell completion generation returned no content'
 }
 $completionText = ($completionLines -join [Environment]::NewLine) + [Environment]::NewLine
+$completionText += "Register-ArgumentCompleter -CommandName 'adl' -ScriptBlock `${__ai_dev_loggerCompleterBlock}" + [Environment]::NewLine
 $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($completionPath, $completionText, $utf8WithoutBom)
 
 Write-Host "Installed binary: $targetPath"
+Write-Host "Short command: $aliasPath"
 Write-Host "Completion script: $completionPath"
 Write-Host "Verified version: $($versionOutput[0])"
 

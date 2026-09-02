@@ -24,6 +24,7 @@ $packageDir = Join-Path $distDir 'package'
 $binaryPath = Join-Path $packageDir 'ai-dev-logger.exe'
 $readmePath = Join-Path $packageDir 'README.md'
 $installerPath = Join-Path $packageDir 'install.ps1'
+$onlineInstallerPath = Join-Path $distDir 'install-online.ps1'
 $archiveName = "ai-dev-logger_${Version}_windows_amd64.zip"
 $archivePath = Join-Path $distDir $archiveName
 $checksumPath = Join-Path $distDir 'checksums.txt'
@@ -62,6 +63,7 @@ try {
 
     Copy-Item -LiteralPath (Join-Path $repoRoot 'README.md') -Destination $readmePath -Force
     Copy-Item -LiteralPath (Join-Path $repoRoot 'scripts\install.ps1') -Destination $installerPath -Force
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'scripts\install-online.ps1') -Destination $onlineInstallerPath -Force
     Compress-Archive -LiteralPath $binaryPath, $readmePath, $installerPath -DestinationPath $archivePath -Force
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -78,16 +80,21 @@ try {
         $archive.Dispose()
     }
 
-    $hash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $checksumLine = "$hash  $archiveName"
+    $archiveHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $onlineInstallerHash = (Get-FileHash -LiteralPath $onlineInstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $checksumLines = @(
+        "$archiveHash  $archiveName"
+        "$onlineInstallerHash  install-online.ps1"
+    )
     [System.IO.File]::WriteAllText(
         $checksumPath,
-        $checksumLine + [Environment]::NewLine,
+        ($checksumLines -join [Environment]::NewLine) + [Environment]::NewLine,
         [System.Text.Encoding]::ASCII
     )
 
     Write-Host "Created: $archivePath" -ForegroundColor Green
-    Write-Host "Checksum: $checksumLine" -ForegroundColor Green
+    Write-Host "Created: $onlineInstallerPath" -ForegroundColor Green
+    $checksumLines | ForEach-Object { Write-Host "Checksum: $_" -ForegroundColor Green }
     Write-Host 'Embedded version information:'
     $versionOutput | ForEach-Object { Write-Host "  $_" }
 }
