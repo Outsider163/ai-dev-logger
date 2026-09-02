@@ -814,9 +814,9 @@ ai-dev-logger embed --all
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check.ps1
 ```
 
-脚本会依次检查 Go 格式、依赖文件、单元测试、静态分析和构建，并在临时目录演练安装器与 PowerShell 补全配置。测试文件保存在被 Git 忽略的 `.tmp\ci` 目录，不会修改真实用户 PATH 或 PowerShell 配置。
+脚本会依次检查 Go 格式、依赖文件、单元测试、静态分析和构建，并在临时目录演练在线安装器、离线安装器、短命令和 PowerShell 补全配置。测试文件保存在被 Git 忽略的 `.tmp\ci` 目录，不会修改真实用户 PATH 或 PowerShell 配置。
 
-仓库中的 `.github/workflows/ci.yml` 会在每次 push、Pull Request 和手工触发时，在 GitHub 的 Ubuntu 环境执行同类检查。测试使用本地临时 HTTP 服务，不需要把真实 API Key 配置到 GitHub Secrets。
+仓库中的 `.github/workflows/ci.yml` 会在每次 push、Pull Request 和手工触发时同时运行两条检查链路：Ubuntu 负责通用 Go 质量检查和 Windows 交叉编译，Windows 负责执行完整 `scripts/check.ps1`，真实运行 `.exe` 和两个安装器。测试使用本地临时 HTTP 服务，不需要把真实 API Key 配置到 GitHub Secrets。
 
 也可以分别执行：
 
@@ -847,7 +847,7 @@ git tag -a v1.2.1 -m "Release v1.2.1"
 git push origin v1.2.1
 ```
 
-`.github/workflows/release.yml` 会验证标签、运行质量检查、构建 Windows 二进制、上传固定名称的一键安装器、生成 SHA-256 校验文件，并通过 GitHub 自动生成版本说明。预发布标签如 `v1.2.0-rc.1` 会自动创建为 Pre-release。
+`.github/workflows/release.yml` 会先在 Windows Runner 完成相同的安装验收；只有这个门禁通过，Ubuntu 任务才会验证标签、运行质量检查、构建 Windows 二进制、上传固定名称的一键安装器、生成 SHA-256 校验文件，并通过 GitHub 自动生成版本说明。预发布标签如 `v1.2.0-rc.1` 会自动创建为 Pre-release。
 
 ## 命令速查
 

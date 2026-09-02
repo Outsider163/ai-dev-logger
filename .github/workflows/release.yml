@@ -6,17 +6,41 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  windows-check:
+    name: CLI and installer checks (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      GOTOOLCHAIN: local
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.22.x'
+          cache-dependency-path: go.sum
+
+      - name: Run Windows checks
+        shell: pwsh
+        run: ./scripts/check.ps1
+
   release:
     name: Build and publish Windows release
+    needs: windows-check
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
     env:
       GOTOOLCHAIN: local
 

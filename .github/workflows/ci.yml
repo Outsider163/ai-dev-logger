@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Go quality checks
+    name: Go quality checks (Ubuntu)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -61,3 +61,24 @@ jobs:
         run: |
           mkdir -p dist
           GOOS=windows GOARCH=amd64 go build -trimpath -o dist/ai-dev-logger.exe .
+
+  windows-quality:
+    name: CLI and installer checks (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      GOTOOLCHAIN: local
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.22.x'
+          cache-dependency-path: go.sum
+
+      - name: Run Windows checks
+        shell: pwsh
+        run: ./scripts/check.ps1
