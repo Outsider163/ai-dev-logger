@@ -109,6 +109,13 @@ try {
             throw "Online installer parsed the wrong checksum: $parsedHash"
         }
 
+        $releaseInfo = Get-AIDevLoggerReleaseInfo -ChecksumPath $onlineFixtureChecksums
+        if ($releaseInfo.Version -ne 'v9.8.7' -or
+            $releaseInfo.ArchiveName -ne $onlineFixtureArchiveName -or
+            $releaseInfo.Hash -ne $fixtureHash) {
+            throw "Online installer parsed the wrong release information: $($releaseInfo | Out-String)"
+        }
+
         Assert-AIDevLoggerArchive `
             -ArchivePath $onlineFixtureArchive `
             -ExtractionPath (Join-Path $buildDir 'online-installer-extraction')
@@ -127,25 +134,7 @@ try {
         }
 
         function Invoke-RestMethod {
-            param(
-                [string]$Uri,
-                [hashtable]$Headers,
-                [string]$Method
-            )
-
-            return [PSCustomObject]@{
-                tag_name = 'v9.8.7'
-                assets   = @(
-                    [PSCustomObject]@{
-                        name                 = $onlineFixtureArchiveName
-                        browser_download_url = 'https://github.com/Outsider163/ai-dev-logger/releases/download/v9.8.7/archive'
-                    }
-                    [PSCustomObject]@{
-                        name                 = 'checksums.txt'
-                        browser_download_url = 'https://github.com/Outsider163/ai-dev-logger/releases/download/v9.8.7/checksums'
-                    }
-                )
-            }
+            throw 'Online installer must not call the rate-limited GitHub API'
         }
 
         function Invoke-WebRequest {
@@ -156,11 +145,11 @@ try {
                 [switch]$UseBasicParsing
             )
 
-            if ($Uri.EndsWith('/archive', [StringComparison]::Ordinal)) {
+            if ($Uri.EndsWith("/$onlineFixtureArchiveName", [StringComparison]::Ordinal)) {
                 Copy-Item -LiteralPath $onlineFixtureArchive -Destination $OutFile
                 return
             }
-            if ($Uri.EndsWith('/checksums', [StringComparison]::Ordinal)) {
+            if ($Uri.EndsWith('/checksums.txt', [StringComparison]::Ordinal)) {
                 Copy-Item -LiteralPath $onlineFixtureChecksums -Destination $OutFile
                 return
             }

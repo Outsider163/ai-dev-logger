@@ -61,6 +61,41 @@ function Get-AIDevLoggerExpectedChecksum {
     return $foundHashes[0]
 }
 
+function Get-AIDevLoggerReleaseInfo {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ChecksumPath
+    )
+
+    $releasePattern = '^ai-dev-logger_(?<version>v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?)_windows_amd64\.zip$'
+    $candidates = @()
+
+    foreach ($line in Get-Content -LiteralPath $ChecksumPath) {
+        $checksumMatch = [regex]::Match($line, '^(?<hash>[0-9A-Fa-f]{64})\s+\*?(?<name>.+?)\s*$')
+        if (-not $checksumMatch.Success) {
+            continue
+        }
+
+        $assetName = $checksumMatch.Groups['name'].Value
+        $releaseMatch = [regex]::Match($assetName, $releasePattern)
+        if (-not $releaseMatch.Success) {
+            continue
+        }
+
+        $candidates += [PSCustomObject]@{
+            Version     = $releaseMatch.Groups['version'].Value
+            ArchiveName = $assetName
+            Hash        = $checksumMatch.Groups['hash'].Value.ToLowerInvariant()
+        }
+    }
+
+    if ($candidates.Count -ne 1) {
+        throw "Expected exactly one Windows amd64 release archive in checksums.txt, found $($candidates.Count)"
+    }
+
+    return $candidates[0]
+}
+
 function Assert-AIDevLoggerArchive {
     param(
         [Parameter(Mandatory = $true)]
@@ -171,10 +206,8 @@ function Invoke-AIDevLoggerOnlineInstall {
         throw 'The current ai-dev-logger release supports Windows only'
     }
 
-    $repository = 'Outsider163/ai-dev-logger'
-    $releaseApiUrl = "https://api.github.com/repos/$repository/releases/latest"
+    $latestDownloadBase = 'https://github.com/Outsider163/ai-dev-logger/releases/latest/download'
     $headers = @{
-        Accept       = 'application/vnd.github+json'
         'User-Agent' = 'ai-dev-logger-online-installer'
     }
     $previousProgressPreference = $ProgressPreference
@@ -185,42 +218,27 @@ function Invoke-AIDevLoggerOnlineInstall {
         $ProgressPreference = 'SilentlyContinue'
         [Net.ServicePointManager]::SecurityProtocol = $previousSecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-        Write-Host 'Finding the latest ai-dev-logger release...'
-        $release = Invoke-RestMethod -Uri $releaseApiUrl -Headers $headers -Method Get
-        $version = [string]$release.tag_name
-        if ($version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$') {
-            throw "GitHub returned an invalid release tag: $version"
-        }
-
-        $archiveName = "ai-dev-logger_${version}_windows_amd64.zip"
-        $archiveAssets = @($release.assets | Where-Object { $_.name -eq $archiveName })
-        $checksumAssets = @($release.assets | Where-Object { $_.name -eq 'checksums.txt' })
-        if ($archiveAssets.Count -ne 1) {
-            throw "Release $version does not contain exactly one $archiveName asset"
-        }
-        if ($checksumAssets.Count -ne 1) {
-            throw "Release $version does not contain exactly one checksums.txt asset"
-        }
-
-        $archiveUrl = Assert-AIDevLoggerGitHubUri `
-            -Value ([string]$archiveAssets[0].browser_download_url) `
-            -Description 'Release archive URL'
+        $tempDirectory = New-AIDevLoggerTempDirectory
+        $checksumPath = Join-Path $tempDirectory 'checksums.txt'
         $checksumUrl = Assert-AIDevLoggerGitHubUri `
-            -Value ([string]$checksumAssets[0].browser_download_url) `
+            -Value "$latestDownloadBase/checksums.txt" `
             -Description 'Checksum URL'
 
-        $tempDirectory = New-AIDevLoggerTempDirectory
+        Write-Host 'Finding the latest ai-dev-logger release...'
+        Invoke-WebRequest -Uri $checksumUrl -Headers $headers -OutFile $checksumPath -UseBasicParsing
+        $releaseInfo = Get-AIDevLoggerReleaseInfo -ChecksumPath $checksumPath
+        $version = $releaseInfo.Version
+        $archiveName = $releaseInfo.ArchiveName
+        $archiveUrl = Assert-AIDevLoggerGitHubUri `
+            -Value "$latestDownloadBase/$archiveName" `
+            -Description 'Release archive URL'
         $archivePath = Join-Path $tempDirectory $archiveName
-        $checksumPath = Join-Path $tempDirectory 'checksums.txt'
         $extractionPath = Join-Path $tempDirectory 'package'
 
         Write-Host "Downloading ai-dev-logger $version..."
         Invoke-WebRequest -Uri $archiveUrl -Headers $headers -OutFile $archivePath -UseBasicParsing
-        Invoke-WebRequest -Uri $checksumUrl -Headers $headers -OutFile $checksumPath -UseBasicParsing
 
-        $expectedHash = Get-AIDevLoggerExpectedChecksum `
-            -ChecksumPath $checksumPath `
-            -AssetName $archiveName
+        $expectedHash = $releaseInfo.Hash
         $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
         if (-not [string]::Equals($actualHash, $expectedHash, [StringComparison]::Ordinal)) {
             throw "SHA-256 verification failed for $archiveName"

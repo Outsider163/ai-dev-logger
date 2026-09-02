@@ -41,7 +41,7 @@
 irm https://github.com/Outsider163/ai-dev-logger/releases/latest/download/install-online.ps1 | iex
 ```
 
-安装器会自动查找最新正式版本、下载 Windows 压缩包、核对 `checksums.txt` 中的 SHA-256，并安装到当前用户目录：
+安装器会从最新 Release 的 `checksums.txt` 识别正式版本，不调用受匿名限流影响的 GitHub API。随后它会下载 Windows 压缩包、核对 SHA-256，并安装到当前用户目录：
 
 ```text
 %LOCALAPPDATA%\Programs\ai-dev-logger
@@ -835,7 +835,7 @@ go build -trimpath -o dist\ai-dev-logger.exe .
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\package.ps1 `
-  -Version v1.2.0
+  -Version v1.2.1
 ```
 
 脚本要求 Git 工作区干净，并在 `dist` 中生成 Windows ZIP、`install-online.ps1` 和 `checksums.txt`。ZIP 内会校验 `ai-dev-logger.exe`、`install.ps1` 和 `README.md` 三个必需文件，校验文件同时记录 ZIP 与在线安装器的 SHA-256。
@@ -843,8 +843,8 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 确认主分支已经推送且 CI 通过后，维护者可以创建并推送版本标签：
 
 ```powershell
-git tag -a v1.2.0 -m "Release v1.2.0"
-git push origin v1.2.0
+git tag -a v1.2.1 -m "Release v1.2.1"
+git push origin v1.2.1
 ```
 
 `.github/workflows/release.yml` 会验证标签、运行质量检查、构建 Windows 二进制、上传固定名称的一键安装器、生成 SHA-256 校验文件，并通过 GitHub 自动生成版本说明。预发布标签如 `v1.2.0-rc.1` 会自动创建为 Pre-release。
