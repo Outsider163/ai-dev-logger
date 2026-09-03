@@ -69,10 +69,10 @@ func TestRunInteractiveReportsInputErrorsAndContinues(t *testing.T) {
 	}
 
 	for _, expected := range []string{
-		"操作失败: usage: /find <query>",
-		"操作失败: usage: /show <positive note id>",
+		"操作失败: usage: search <query>",
+		"操作失败: id must be a positive number",
 		"操作失败: list limit must be between 1 and 100",
-		"操作失败: unknown command /unknown; type /help",
+		"操作失败: 交互模式不支持命令 \"unknown\"",
 		"已退出交互模式",
 	} {
 		if !strings.Contains(output.String(), expected) {

@@ -320,6 +320,49 @@ try {
         throw "Short command did not preserve the inline tag: $($quickAddShowOutput -join ' | ')"
     }
 
+    $interactiveDBPath = Join-Path $resolvedInstallSmokeDir 'interactive-smoke.db'
+    $interactiveInput = @(
+        'first note #smoke'
+        'list'
+        'adl list'
+        '/list'
+        'search first --limit 5'
+        'show 1'
+        'update 1 --title "updated title" --body "updated body" --tag updated'
+        'show 1'
+        'delete 1'
+        ''
+        'show 1'
+        'delete 1'
+        'y'
+        'second note'
+        'add list is a command #cli'
+        'list'
+        'exit'
+        'must not be saved after exit'
+    ) -join "`n"
+    $interactiveOutput = @($interactiveInput | & $installedAliasPath --db $interactiveDBPath) -join "`n"
+    Assert-LastExitCode 'Interactive CRUD smoke test'
+    foreach ($marker in @('updated note #1', 'deleted note #1', 'saved note #2: second note', 'saved note #3: list is a command')) {
+        if (-not $interactiveOutput.Contains($marker)) {
+            throw "Interactive session did not produce $marker`: $interactiveOutput"
+        }
+    }
+    if ([regex]::Matches($interactiveOutput, '#1  updated title').Count -ne 2 -or
+        [regex]::Matches($interactiveOutput, 'tags: updated').Count -ne 2) {
+        throw "Interactive update or deletion cancellation failed: $interactiveOutput"
+    }
+    $interactiveExportPath = Join-Path $resolvedInstallSmokeDir 'interactive-smoke.json'
+    & $installedAliasPath --db $interactiveDBPath export --format json --output $interactiveExportPath | Out-Null
+    Assert-LastExitCode 'Interactive CRUD readback export'
+    $interactiveNotes = @((Get-Content -Raw -LiteralPath $interactiveExportPath | ConvertFrom-Json).notes)
+    if ($interactiveNotes.Count -ne 2 -or
+        $interactiveNotes[0].id -ne 2 -or $interactiveNotes[0].body -ne 'second note' -or
+        $interactiveNotes[1].id -ne 3 -or $interactiveNotes[1].body -ne 'list is a command' -or
+        @($interactiveNotes[1].tags).Count -ne 1 -or $interactiveNotes[1].tags[0] -ne 'cli') {
+        throw 'Interactive commands became notes, deletion failed, or deleted IDs were reused'
+    }
+
     $doctorAPIKeyBefore = $env:AI_DEV_LOGGER_API_KEY
     $doctorFallbackKeyBefore = $env:OPENAI_API_KEY
     try {
