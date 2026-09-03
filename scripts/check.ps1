@@ -229,6 +229,82 @@ try {
     & $installedAliasPath --version | Out-Null
     Assert-LastExitCode 'Short command smoke test'
 
+    $helpSmokeDir = Join-Path $buildDir ('help-smoke-' + [Guid]::NewGuid().ToString('N'))
+    $helpRequests = @(
+        @{ Arguments = @(); Marker = 'adl list' }
+        @{ Arguments = @('add'); Marker = 'adl add --title' }
+        @{ Arguments = @('config', 'set'); Marker = 'adl config set --model' }
+        @{ Arguments = @('doctor'); Marker = 'adl doctor --online' }
+        @{ Arguments = @('restore'); Marker = 'adl restore --input' }
+    )
+    foreach ($request in $helpRequests) {
+        $helpArgs = @(
+            '--db', (Join-Path $helpSmokeDir 'notes.db'),
+            '--config', (Join-Path $helpSmokeDir 'config.json')
+        ) + $request.Arguments + @('--help')
+        $helpOutput = @(& $installedAliasPath @helpArgs) -join "`n"
+        Assert-LastExitCode 'CLI help smoke test'
+        if (-not $helpOutput.Contains($request.Marker)) {
+            throw "CLI help did not show the expected example: $($request.Marker)"
+        }
+    }
+    if (Test-Path -LiteralPath $helpSmokeDir) {
+        throw 'Reading CLI help must not create a database or configuration directory'
+    }
+
+    $configSmokeDir = Join-Path $buildDir ('config-smoke-' + [Guid]::NewGuid().ToString('N'))
+    $configSmokePath = Join-Path $configSmokeDir 'config.json'
+    $configAPIKeyBefore = $env:AI_DEV_LOGGER_API_KEY
+    $configFallbackKeyBefore = $env:OPENAI_API_KEY
+    try {
+        $env:AI_DEV_LOGGER_API_KEY = 'environment-test-key-5678'
+        $env:OPENAI_API_KEY = 'fallback-test-key-9012'
+        & $installedAliasPath --config $configSmokePath config show | Out-Null
+        Assert-LastExitCode 'Missing config display smoke test'
+        if (Test-Path -LiteralPath $configSmokeDir) {
+            throw 'Displaying missing config must not create its directory'
+        }
+
+        & $installedAliasPath --config $configSmokePath config set `
+            --api-key 'stored-test-key-1234' `
+            --base-url 'https://example.test/v1/' `
+            --model 'test-chat' `
+            --embedding-model 'test-embedding' | Out-Null
+        Assert-LastExitCode 'Initial configuration smoke test'
+        & $installedAliasPath --config $configSmokePath config set --model 'updated-chat' | Out-Null
+        Assert-LastExitCode 'Partial configuration update smoke test'
+        $storedConfig = Get-Content -Raw -LiteralPath $configSmokePath | ConvertFrom-Json
+        if ($storedConfig.llm.api_key -ne 'stored-test-key-1234' -or
+            $storedConfig.llm.base_url -ne 'https://example.test/v1' -or
+            $storedConfig.llm.model -ne 'updated-chat' -or
+            $storedConfig.llm.embedding_model -ne 'test-embedding') {
+            throw 'Partial configuration update changed an unspecified field or persisted an environment key'
+        }
+
+        $configOutput = @(& $installedAliasPath --config $configSmokePath config show) -join "`n"
+        Assert-LastExitCode 'Masked configuration display smoke test'
+        if (-not $configOutput.Contains('llm.api_key: envi...5678') -or
+            -not $configOutput.Contains('llm.api_key_source: AI_DEV_LOGGER_API_KEY') -or
+            $configOutput.Contains('environment-test-key-5678') -or
+            $configOutput.Contains('stored-test-key-1234') -or
+            $configOutput.Contains('fallback-test-key-9012')) {
+            throw 'Configuration display did not mask the effective environment key correctly'
+        }
+
+        & $installedAliasPath --config $configSmokePath config set --embedding-model= | Out-Null
+        Assert-LastExitCode 'Clear optional configuration smoke test'
+        $clearedConfig = Get-Content -Raw -LiteralPath $configSmokePath | ConvertFrom-Json
+        if ($clearedConfig.llm.embedding_model -ne '' -or
+            $clearedConfig.llm.model -ne 'updated-chat' -or
+            $clearedConfig.llm.api_key -ne 'stored-test-key-1234') {
+            throw 'Clearing the embedding model changed other configuration fields'
+        }
+    }
+    finally {
+        $env:AI_DEV_LOGGER_API_KEY = $configAPIKeyBefore
+        $env:OPENAI_API_KEY = $configFallbackKeyBefore
+    }
+
     $quickAddDBPath = Join-Path $resolvedInstallSmokeDir 'quick-add-smoke.db'
     $quickAddOutput = @(& $installedAliasPath `
         --db $quickAddDBPath `
@@ -242,6 +318,28 @@ try {
     Assert-LastExitCode 'Short command quick-add readback test'
     if ($quickAddShowOutput -notcontains 'tags: smoke') {
         throw "Short command did not preserve the inline tag: $($quickAddShowOutput -join ' | ')"
+    }
+
+    $doctorAPIKeyBefore = $env:AI_DEV_LOGGER_API_KEY
+    $doctorFallbackKeyBefore = $env:OPENAI_API_KEY
+    try {
+        $env:AI_DEV_LOGGER_API_KEY = $null
+        $env:OPENAI_API_KEY = $null
+        $doctorOutput = @(& $installedAliasPath `
+            --db $quickAddDBPath `
+            --config (Join-Path $resolvedInstallSmokeDir 'missing-doctor-config.json') `
+            doctor)
+        Assert-LastExitCode 'Local-only doctor smoke test'
+        $doctorText = $doctorOutput -join "`n"
+        if ($doctorText -notmatch '\[PASS\] local notes\s+required; ready' -or
+            $doctorText -notmatch '\[WARN\] AI enhancement\s+optional; not configured' -or
+            $doctorText -notmatch '\[WARN\] semantic search\s+optional; not configured') {
+            throw "Doctor did not distinguish required and optional capabilities: $doctorText"
+        }
+    }
+    finally {
+        $env:AI_DEV_LOGGER_API_KEY = $doctorAPIKeyBefore
+        $env:OPENAI_API_KEY = $doctorFallbackKeyBefore
     }
 
     $smokeProfilePath = Join-Path $resolvedInstallSmokeDir 'profile\Microsoft.PowerShell_profile.ps1'

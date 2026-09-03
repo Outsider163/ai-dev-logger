@@ -33,9 +33,11 @@ type setupOptions struct {
 }
 
 var setupCmd = &cobra.Command{
-	Use:   "setup",
-	Short: "Configure DeepSeek chat access interactively",
-	Args:  cobra.NoArgs,
+	Use:     "setup",
+	Short:   "交互式配置 DeepSeek 聊天功能",
+	Long:    "按提示输入 API Key、API 地址和聊天模型，并发送一个小请求验证连接。\n默认验证成功后才保存；新输入的密钥会存储在本地配置文件中。此流程不配置向量模型。",
+	Example: "  adl setup\n  adl setup --skip-test\n  adl doctor --online",
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSetup(cmd.Context(), setupOptions{
 			ConfigPath: configPath,
@@ -48,8 +50,8 @@ var setupCmd = &cobra.Command{
 }
 
 func init() {
-	setupCmd.Flags().BoolVar(&setupSkipTest, "skip-test", false, "Save without testing the DeepSeek chat API")
-	setupCmd.Flags().DurationVar(&setupTimeout, "timeout", defaultSetupTimeout, "Connection test timeout")
+	setupCmd.Flags().BoolVar(&setupSkipTest, "skip-test", false, "只保存配置，跳过聊天接口验证")
+	setupCmd.Flags().DurationVar(&setupTimeout, "timeout", defaultSetupTimeout, "连接验证的最长等待时间")
 }
 
 func runSetup(ctx context.Context, options setupOptions) error {
@@ -62,8 +64,8 @@ func runSetup(ctx context.Context, options setupOptions) error {
 		return err
 	}
 
-	fmt.Fprintln(options.Output, "AI Dev Logger DeepSeek setup")
-	fmt.Fprintln(options.Output, "A newly entered API key will be stored in your local config file.")
+	fmt.Fprintln(options.Output, "AI Dev Logger | DeepSeek 配置")
+	fmt.Fprintln(options.Output, "新输入的 API Key 会保存在本地配置文件中；直接回车可采用方括号中的默认值。")
 
 	reader := bufio.NewReader(options.Input)
 	effectiveKey, _ := appconfig.ResolveAPIKey(cfg.LLM.APIKey)
@@ -85,7 +87,7 @@ func runSetup(ctx context.Context, options setupOptions) error {
 	if currentBaseURL != "" && currentBaseURL != appconfig.Default().LLM.BaseURL {
 		baseURLDefault = currentBaseURL
 	}
-	baseURL, err := readSetupPrompt(reader, options.Output, "DeepSeek base URL", baseURLDefault)
+	baseURL, err := readSetupPrompt(reader, options.Output, "DeepSeek API 地址", baseURLDefault)
 	if err != nil {
 		return err
 	}
@@ -98,7 +100,7 @@ func runSetup(ctx context.Context, options setupOptions) error {
 	if currentModel := strings.TrimSpace(cfg.LLM.Model); strings.HasPrefix(currentModel, "deepseek-") {
 		modelDefault = currentModel
 	}
-	model, err := readSetupPrompt(reader, options.Output, "DeepSeek chat model", modelDefault)
+	model, err := readSetupPrompt(reader, options.Output, "DeepSeek 聊天模型", modelDefault)
 	if err != nil {
 		return err
 	}
@@ -116,7 +118,7 @@ func runSetup(ctx context.Context, options setupOptions) error {
 	if options.SkipTest {
 		fmt.Fprintln(options.Output, "connection test: skipped")
 	} else {
-		fmt.Fprintln(options.Output, "Testing DeepSeek chat connection...")
+		fmt.Fprintln(options.Output, "正在验证 DeepSeek 聊天接口，可能产生少量 API 用量...")
 		probeContext, cancel := context.WithTimeout(ctx, options.Timeout)
 		err := llm.NewClient(cfg.LLM).ProbeChat(probeContext)
 		cancel()
@@ -136,7 +138,7 @@ func runSetup(ctx context.Context, options setupOptions) error {
 	if isOfficialDeepSeekBaseURL(baseURL) {
 		fmt.Fprintln(options.Output, "embedding model: not configured (DeepSeek chat setup only)")
 	}
-	fmt.Fprintln(options.Output, "Try: adl add --ai --title \"test\" --body \"hello\"")
+	fmt.Fprintln(options.Output, "下一步: adl add --ai --title \"测试笔记\" --body \"记录一次问题排查\"")
 	return nil
 }
 
@@ -148,7 +150,7 @@ func readSetupSecret(
 ) (string, error) {
 	prompt := "DeepSeek API key"
 	if hasExistingKey {
-		prompt += " (press Enter to keep the current key)"
+		prompt += "（直接回车保留当前密钥）"
 	}
 	fmt.Fprintf(output, "%s: ", prompt)
 

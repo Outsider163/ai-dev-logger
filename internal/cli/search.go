@@ -12,9 +12,11 @@ import (
 var searchLimit int
 
 var searchCmd = &cobra.Command{
-	Use:   "search <query>",
-	Short: "搜索开发笔记",
-	Args:  cobra.ExactArgs(1),
+	Use:     "search <query>",
+	Short:   "按关键词搜索本地笔记",
+	Long:    "在标题、正文和标签中匹配关键词，不调用 AI。\n包含空格的查询请使用引号；按语义搜索请使用 adl semantic。",
+	Example: "  adl search \"SQLite\"\n  adl search \"connection timeout\" --limit 5",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		query := strings.TrimSpace(args[0])
 		if query == "" {
@@ -49,5 +51,5 @@ var searchCmd = &cobra.Command{
 }
 
 func init() {
-	searchCmd.Flags().IntVar(&searchLimit, "limit", 10, "Maximum number of matches to show")
+	searchCmd.Flags().IntVar(&searchLimit, "limit", 10, "最多显示的匹配条数")
 }

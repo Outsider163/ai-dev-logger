@@ -20,12 +20,14 @@ var addAI bool
 var addEmbed bool
 
 var addCmd = &cobra.Command{
-	Use:   "add",
-	Short: "Add a development note",
+	Use:     "add",
+	Short:   "新增开发笔记",
+	Long:    "新增带标题、正文和标签的笔记，正文支持 Markdown，也可从管道读取。\n默认只保存到本地；--ai 调用聊天接口整理内容，--embed 在保存后调用向量接口。",
+	Example: "  adl add --title \"Go map\" --body \"写入前使用 make 初始化\" --tag go\n  adl add --title \"踩坑记录\" --body \"排查连接超时的过程\" --ai\n  Get-Content .\\note.md -Raw | adl add --title \"文件笔记\"",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		title := strings.TrimSpace(addTitle)
 		if title == "" {
-			return fmt.Errorf("title is required, example: ai-dev-logger add --title \"Go map issue\"")
+			return fmt.Errorf("title is required; example: adl add --title \"Go map issue\" --body \"Use make before writing to a map\"")
 		}
 
 		body, err := readBody()
@@ -96,11 +98,11 @@ var addCmd = &cobra.Command{
 }
 
 func init() {
-	addCmd.Flags().StringVarP(&addTitle, "title", "t", "", "Note title")
-	addCmd.Flags().StringVarP(&addBody, "body", "b", "", "Note body, Markdown is supported")
-	addCmd.Flags().StringArrayVar(&addTags, "tag", nil, "Tag, can be used multiple times")
-	addCmd.Flags().BoolVar(&addAI, "ai", false, "Use LLM to polish body, summarize, and generate tags")
-	addCmd.Flags().BoolVar(&addEmbed, "embed", false, "Generate an embedding after the note is saved")
+	addCmd.Flags().StringVarP(&addTitle, "title", "t", "", "笔记标题")
+	addCmd.Flags().StringVarP(&addBody, "body", "b", "", "笔记正文，支持 Markdown")
+	addCmd.Flags().StringArrayVar(&addTags, "tag", nil, "标签，可重复传入")
+	addCmd.Flags().BoolVar(&addAI, "ai", false, "调用聊天接口润色正文、生成摘要和标签")
+	addCmd.Flags().BoolVar(&addEmbed, "embed", false, "保存笔记后调用向量接口生成向量")
 }
 
 func readBody() (string, error) {

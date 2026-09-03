@@ -29,9 +29,11 @@ type importOptions struct {
 }
 
 var importCmd = &cobra.Command{
-	Use:   "import",
-	Short: "Import notes from an ai-dev-logger JSON export",
-	Args:  cobra.NoArgs,
+	Use:     "import",
+	Short:   "从本工具导出的 JSON 文件导入笔记",
+	Long:    "先校验文件，再以事务方式导入笔记；默认跳过重复内容，不导入向量。\n建议先使用 --dry-run 预演，导入完成后可运行 adl embed --all 生成向量。",
+	Example: "  adl import --input notes.json --dry-run\n  adl import --input notes.json\n  adl import --input notes.json --on-duplicate error",
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runImport(cmd.Context(), cmd.OutOrStdout(), importOptions{
 			DBPath:          dbPath,
@@ -43,9 +45,9 @@ var importCmd = &cobra.Command{
 }
 
 func init() {
-	importCmd.Flags().StringVarP(&importInput, "input", "i", "", "JSON export file path")
-	importCmd.Flags().StringVar(&importDuplicatePolicy, "on-duplicate", "skip", "Duplicate policy: skip, error, or allow")
-	importCmd.Flags().BoolVar(&importDryRun, "dry-run", false, "Validate and preview without committing notes")
+	importCmd.Flags().StringVarP(&importInput, "input", "i", "", "JSON 导出文件路径")
+	importCmd.Flags().StringVar(&importDuplicatePolicy, "on-duplicate", "skip", "重复策略：skip 跳过、error 报错、allow 允许重复")
+	importCmd.Flags().BoolVar(&importDryRun, "dry-run", false, "仅校验并预演，不提交笔记")
 	_ = importCmd.MarkFlagRequired("input")
 }
 
@@ -97,7 +99,7 @@ func runImport(ctx context.Context, writer io.Writer, options importOptions) err
 		inputPath,
 	)
 	if result.Imported > 0 {
-		fmt.Fprintln(writer, "embeddings are not imported; run: ai-dev-logger embed --all")
+		fmt.Fprintln(writer, "embeddings are not imported; run: adl embed --all")
 	}
 	return nil
 }

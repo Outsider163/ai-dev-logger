@@ -16,8 +16,10 @@ import (
 )
 
 var embedCmd = &cobra.Command{
-	Use:   "embed [id]",
-	Short: "Incrementally generate and store note embeddings",
+	Use:     "embed [id]",
+	Short:   "增量生成笔记向量",
+	Long:    "调用向量接口处理笔记内容，并将结果存入 SQLite，可能产生 API 用量。\n默认跳过内容未变化的笔记；--force 强制重新生成。需要先配置向量模型。",
+	Example: "  adl embed 1\n  adl embed --all\n  adl embed --all --force",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if embedAll && len(args) != 0 {
 			return fmt.Errorf("--all does not accept a note id")
@@ -34,7 +36,7 @@ var embedCmd = &cobra.Command{
 		}
 		model := strings.TrimSpace(cfg.LLM.EmbeddingModel)
 		if model == "" {
-			return fmt.Errorf("embedding model is empty, run config set --embedding-model")
+			return fmt.Errorf("embedding model is empty, run adl config set --embedding-model")
 		}
 		cfg.LLM.EmbeddingModel = model
 
@@ -126,8 +128,8 @@ var embedAll bool
 var embedForce bool
 
 func init() {
-	embedCmd.Flags().BoolVar(&embedAll, "all", false, "Update embeddings for all notes")
-	embedCmd.Flags().BoolVar(&embedForce, "force", false, "Regenerate embeddings even when note content is unchanged")
+	embedCmd.Flags().BoolVar(&embedAll, "all", false, "更新全部笔记的向量")
+	embedCmd.Flags().BoolVar(&embedForce, "force", false, "即使内容未变化也重新生成向量")
 }
 
 type embeddingFailure struct {
@@ -211,7 +213,7 @@ func (r embeddingBatchResult) failureError() error {
 		noteWord = "note"
 	}
 	return fmt.Errorf(
-		"%d %s failed to embed (%s); fix the reported errors and rerun embed --all",
+		"%d %s failed to embed (%s); fix the reported errors and rerun adl embed --all",
 		len(r.Failures),
 		noteWord,
 		strings.Join(noteIDs, ", "),

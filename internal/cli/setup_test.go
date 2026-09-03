@@ -77,6 +77,14 @@ func TestRunSetupTestsThenSavesDeepSeekConfig(t *testing.T) {
 	if !strings.Contains(output.String(), "connection test: passed") {
 		t.Fatalf("unexpected output:\n%s", output.String())
 	}
+	for _, expected := range []string{"本地配置文件", "API 用量", "下一步: adl add --ai"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("setup guidance is missing %q:\n%s", expected, output.String())
+		}
+	}
+	if strings.Contains(output.String(), "test-key") {
+		t.Fatalf("setup guidance must not reveal the API key: %s", output.String())
+	}
 }
 
 func TestRunSetupFailureDoesNotOverwriteConfig(t *testing.T) {

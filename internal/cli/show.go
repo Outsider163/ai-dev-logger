@@ -12,9 +12,10 @@ import (
 )
 
 var showCmd = &cobra.Command{
-	Use:   "show <id>",
-	Short: "Show a full note",
-	Args:  cobra.ExactArgs(1),
+	Use:     "show <id>",
+	Short:   "查看一条笔记的完整内容",
+	Example: "  adl show 1",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, err := strconv.ParseInt(args[0], 10, 64)
 		if err != nil || id <= 0 {

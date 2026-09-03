@@ -13,9 +13,11 @@ import (
 var deleteYes bool
 
 var deleteCmd = &cobra.Command{
-	Use:   "delete <id>",
-	Short: "Delete a note",
-	Args:  cobra.ExactArgs(1),
+	Use:     "delete <id>",
+	Short:   "永久删除一条笔记",
+	Long:    "删除笔记及其向量，操作不可撤销。\n先用 adl show <id> 核对笔记，再传入 --yes 确认。",
+	Example: "  adl show 1\n  adl delete 1 --yes",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, err := strconv.ParseInt(args[0], 10, 64)
 		if err != nil || id <= 0 {
@@ -43,5 +45,5 @@ var deleteCmd = &cobra.Command{
 }
 
 func init() {
-	deleteCmd.Flags().BoolVar(&deleteYes, "yes", false, "Confirm permanent deletion")
+	deleteCmd.Flags().BoolVar(&deleteYes, "yes", false, "确认永久删除")
 }

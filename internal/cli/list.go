@@ -12,8 +12,9 @@ import (
 var listLimit int
 
 var listCmd = &cobra.Command{
-	Use:   "list",
-	Short: "列出最近的开发笔记",
+	Use:     "list",
+	Short:   "列出最近的开发笔记",
+	Example: "  adl list\n  adl list --limit 5",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		db, err := store.Open(dbPath)
 		if err != nil {
@@ -43,7 +44,7 @@ var listCmd = &cobra.Command{
 }
 
 func init() {
-	listCmd.Flags().IntVar(&listLimit, "limit", 20, "Maximum number of notes to show")
+	listCmd.Flags().IntVar(&listLimit, "limit", 20, "最多显示的笔记条数")
 }
 
 func firstLine(text string) string {

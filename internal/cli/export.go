@@ -48,9 +48,11 @@ type jsonExportNote struct {
 }
 
 var exportCmd = &cobra.Command{
-	Use:   "export",
-	Short: "Export all notes to Markdown or JSON",
-	Args:  cobra.NoArgs,
+	Use:     "export",
+	Short:   "将全部笔记导出为 Markdown 或 JSON",
+	Long:    "Markdown 适合阅读，JSON 可用于 adl import。导出文件不包含向量。\n默认拒绝覆盖已有文件；需要完整数据库备份请使用 adl backup。",
+	Example: "  adl export --format markdown --output notes.md\n  adl export --format json --output notes.json",
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runExport(cmd.Context(), cmd.OutOrStdout(), exportOptions{
 			DBPath: dbPath,
@@ -62,9 +64,9 @@ var exportCmd = &cobra.Command{
 }
 
 func init() {
-	exportCmd.Flags().StringVar(&exportFormat, "format", "markdown", "Export format: markdown or json")
-	exportCmd.Flags().StringVarP(&exportOutput, "output", "o", "", "Output file path")
-	exportCmd.Flags().BoolVar(&exportForce, "force", false, "Overwrite an existing output file")
+	exportCmd.Flags().StringVar(&exportFormat, "format", "markdown", "导出格式：markdown 或 json")
+	exportCmd.Flags().StringVarP(&exportOutput, "output", "o", "", "导出文件路径")
+	exportCmd.Flags().BoolVar(&exportForce, "force", false, "覆盖已有导出文件")
 	_ = exportCmd.MarkFlagRequired("output")
 }
 

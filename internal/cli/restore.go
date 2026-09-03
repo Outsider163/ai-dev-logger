@@ -28,9 +28,11 @@ type restoreOptions struct {
 }
 
 var restoreCmd = &cobra.Command{
-	Use:   "restore",
-	Short: "Verify and restore a complete SQLite backup",
-	Args:  cobra.NoArgs,
+	Use:     "restore",
+	Short:   "校验并恢复完整 SQLite 备份",
+	Long:    "恢复会替换目标数据库中的全部笔记和向量，不是合并导入。\n先使用 --dry-run 预演，再加 --yes 确认；目标数据库存在时会先创建安全备份。",
+	Example: "  adl restore --input notes-backup.db --dry-run\n  adl restore --input notes-backup.db --yes",
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runRestore(cmd.Context(), cmd.OutOrStdout(), restoreOptions{
 			DBPath: dbPath,
@@ -42,9 +44,9 @@ var restoreCmd = &cobra.Command{
 }
 
 func init() {
-	restoreCmd.Flags().StringVarP(&restoreInput, "input", "i", "", "SQLite backup file path")
-	restoreCmd.Flags().BoolVar(&restoreDryRun, "dry-run", false, "Verify and describe the restore without changing files")
-	restoreCmd.Flags().BoolVarP(&restoreYes, "yes", "y", false, "Confirm replacing the target database")
+	restoreCmd.Flags().StringVarP(&restoreInput, "input", "i", "", "SQLite 备份文件路径")
+	restoreCmd.Flags().BoolVar(&restoreDryRun, "dry-run", false, "仅校验并预演，不修改文件")
+	restoreCmd.Flags().BoolVarP(&restoreYes, "yes", "y", false, "确认替换目标数据库")
 	_ = restoreCmd.MarkFlagRequired("input")
 }
 

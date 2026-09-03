@@ -127,10 +127,10 @@ func (c *Client) ValidateEmbeddingConfig() error {
 		return missingAPIKeyError()
 	}
 	if c.baseURL == "" {
-		return fmt.Errorf("llm base url is empty, run config set --base-url")
+		return fmt.Errorf("llm base url is empty, run adl config set --base-url")
 	}
 	if c.embeddingModel == "" {
-		return fmt.Errorf("llm embedding model is empty, run config set --embedding-model")
+		return fmt.Errorf("llm embedding model is empty, run adl config set --embedding-model")
 	}
 	return nil
 }
@@ -141,10 +141,10 @@ func (c *Client) ValidateChatConfig() error {
 		return missingAPIKeyError()
 	}
 	if c.baseURL == "" {
-		return fmt.Errorf("llm base url is empty, run config set --base-url")
+		return fmt.Errorf("llm base url is empty, run adl config set --base-url")
 	}
 	if c.model == "" {
-		return fmt.Errorf("llm model is empty, run config set --model")
+		return fmt.Errorf("llm model is empty, run adl config set --model")
 	}
 	return nil
 }
@@ -220,7 +220,7 @@ func (c *Client) ExplainSearch(ctx context.Context, query string, notes []Search
 }
 
 func missingAPIKeyError() error {
-	return fmt.Errorf("llm api key is empty, set %s or run config set --api-key", appconfig.EnvAPIKey)
+	return fmt.Errorf("llm api key is empty, set %s or run adl config set --api-key", appconfig.EnvAPIKey)
 }
 
 type chatCompletionRequest struct {

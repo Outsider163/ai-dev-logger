@@ -51,7 +51,7 @@ func TestRunInteractiveSavesAndReadsNotes(t *testing.T) {
 		"saved note #1: fixed a Go map race",
 		"tags: go, Concurrency",
 		"#1  fixed a Go map race",
-		"bye",
+		"已退出交互模式",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("output does not contain %q:\n%s", expected, output.String())
@@ -69,14 +69,25 @@ func TestRunInteractiveReportsInputErrorsAndContinues(t *testing.T) {
 	}
 
 	for _, expected := range []string{
-		"error: usage: /find <query>",
-		"error: usage: /show <positive note id>",
-		"error: list limit must be between 1 and 100",
-		"error: unknown command /unknown; type /help",
-		"bye",
+		"操作失败: usage: /find <query>",
+		"操作失败: usage: /show <positive note id>",
+		"操作失败: list limit must be between 1 and 100",
+		"操作失败: unknown command /unknown; type /help",
+		"已退出交互模式",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("output does not contain %q:\n%s", expected, output.String())
+		}
+	}
+}
+
+func TestInteractiveHelpExplainsCommandContext(t *testing.T) {
+	var output bytes.Buffer
+	printInteractiveWelcome(&output)
+	printInteractiveHelp(&output)
+	for _, expected := range []string{"本地交互模式", "不会调用 AI", "/list", "/find", "/show", "/exit", "adl> 提示符", "adl --help"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("interactive help is missing %q:\n%s", expected, output.String())
 		}
 	}
 }

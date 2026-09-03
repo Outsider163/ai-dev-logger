@@ -45,18 +45,28 @@ type doctorOptions struct {
 }
 
 type doctorReport struct {
-	checks []doctorCheck
+	checks       []doctorCheck
+	capabilities []doctorCheck
+}
+
+type doctorReadiness struct {
+	databaseReady       bool
+	configReady         bool
+	apiKeyReady         bool
+	baseURLReady        bool
+	chatModelReady      bool
+	embeddingModelReady bool
+	chatAPI             doctorStatus
+	embeddingAPI        doctorStatus
 }
 
 var doctorCmd = &cobra.Command{
-	Use:   "doctor",
-	Short: "Diagnose local configuration and service readiness",
-	Args:  cobra.NoArgs,
+	Use:     "doctor",
+	Short:   "检查本地存储和可选 AI 能力",
+	Long:    "检查数据库、配置文件，以及聊天和向量功能的配置。\n未配置可选 AI 功能只会提示 WARN；默认不联网，--online 仅验证已配置完整的接口。",
+	Example: "  adl doctor\n  adl doctor --online --timeout 20s",
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if doctorTimeout <= 0 {
-			return fmt.Errorf("timeout must be greater than zero")
-		}
-
 		return runDoctor(cmd.Context(), cmd.OutOrStdout(), doctorOptions{
 			ConfigPath: configPath,
 			DBPath:     dbPath,
@@ -67,33 +77,37 @@ var doctorCmd = &cobra.Command{
 }
 
 func init() {
-	doctorCmd.Flags().BoolVar(&doctorOnline, "online", false, "Call chat and embedding APIs")
-	doctorCmd.Flags().DurationVar(&doctorTimeout, "timeout", defaultDoctorTimeout, "Timeout for each online check")
+	doctorCmd.Flags().BoolVar(&doctorOnline, "online", false, "验证已配置的聊天和向量接口，可能产生 API 用量")
+	doctorCmd.Flags().DurationVar(&doctorTimeout, "timeout", defaultDoctorTimeout, "每个在线检查的最长等待时间，包含重试")
 }
 
 func runDoctor(ctx context.Context, writer io.Writer, options doctorOptions) error {
+	if options.Timeout <= 0 {
+		return fmt.Errorf("timeout must be greater than zero")
+	}
+
 	report := doctorReport{}
 	cfg, configReady, configCheck := inspectConfig(options.ConfigPath)
 	report.add(configCheck)
-	report.add(inspectDatabase(options.DBPath))
-
-	apiKeyReady := false
-	baseURLReady := false
-	chatModelReady := false
-	embeddingModelReady := false
+	databaseCheck := inspectDatabase(options.DBPath)
+	report.add(databaseCheck)
+	readiness := doctorReadiness{
+		databaseReady: databaseCheck.Status == doctorPass,
+		configReady:   configReady,
+	}
 
 	if !configReady {
 		report.addSkippedConfigChecks()
 	} else {
 		apiKey, apiKeySource := appconfig.ResolveAPIKey(cfg.LLM.APIKey)
-		apiKeyReady = apiKey != ""
-		if apiKeyReady {
+		readiness.apiKeyReady = apiKey != ""
+		if readiness.apiKeyReady {
 			report.add(doctorCheck{doctorPass, "API key", "configured via " + apiKeySource})
 		} else {
 			report.add(doctorCheck{
-				Status: doctorFail,
+				Status: doctorWarn,
 				Name:   "API key",
-				Detail: "missing; set " + appconfig.EnvAPIKey + " or run config set --api-key",
+				Detail: "not configured (optional); set " + appconfig.EnvAPIKey + " or run adl config set --api-key",
 			})
 		}
 
@@ -101,50 +115,55 @@ func runDoctor(ctx context.Context, writer io.Writer, options doctorOptions) err
 		if err := validateHTTPBaseURL(baseURL); err != nil {
 			report.add(doctorCheck{doctorFail, "LLM base URL", err.Error()})
 		} else {
-			baseURLReady = true
+			readiness.baseURLReady = true
 			report.add(doctorCheck{doctorPass, "LLM base URL", baseURL})
 		}
 
 		chatModel := strings.TrimSpace(cfg.LLM.Model)
-		chatModelReady = chatModel != ""
-		if chatModelReady {
+		readiness.chatModelReady = chatModel != ""
+		if readiness.chatModelReady {
 			report.add(doctorCheck{doctorPass, "chat model", chatModel})
 		} else {
-			report.add(doctorCheck{doctorFail, "chat model", "missing; run config set --model"})
+			report.add(doctorCheck{doctorWarn, "chat model", "not configured (optional); run adl setup or adl config set --model"})
 		}
 
 		embeddingModel := strings.TrimSpace(cfg.LLM.EmbeddingModel)
-		embeddingModelReady = embeddingModel != ""
-		if embeddingModelReady {
+		readiness.embeddingModelReady = embeddingModel != ""
+		if readiness.embeddingModelReady {
 			report.add(doctorCheck{doctorPass, "embedding model", embeddingModel})
 		} else {
-			report.add(doctorCheck{doctorFail, "embedding model", "missing; run config set --embedding-model"})
+			report.add(doctorCheck{doctorWarn, "embedding model", "not configured (optional); needed for semantic search; run adl config set --embedding-model"})
 		}
 	}
 
 	if !options.Online {
 		report.add(doctorCheck{
-			Status: doctorWarn,
+			Status: doctorSkip,
 			Name:   "online probes",
-			Detail: "not requested; run ai-dev-logger doctor --online",
+			Detail: "not requested; run adl doctor --online",
 		})
 	} else if !configReady {
 		report.add(doctorCheck{doctorSkip, "chat API", "configuration could not be loaded"})
 		report.add(doctorCheck{doctorSkip, "embedding API", "configuration could not be loaded"})
 	} else {
 		client := llm.NewClient(cfg.LLM)
-		if apiKeyReady && baseURLReady && chatModelReady {
-			report.add(probeChat(ctx, client, options.Timeout))
+		if readiness.apiKeyReady && readiness.baseURLReady && readiness.chatModelReady {
+			check := probeChat(ctx, client, options.Timeout)
+			readiness.chatAPI = check.Status
+			report.add(check)
 		} else {
 			report.add(doctorCheck{doctorSkip, "chat API", "required settings are not ready"})
 		}
-		if apiKeyReady && baseURLReady && embeddingModelReady {
-			report.add(probeEmbedding(ctx, client, options.Timeout))
+		if readiness.apiKeyReady && readiness.baseURLReady && readiness.embeddingModelReady {
+			check := probeEmbedding(ctx, client, options.Timeout)
+			readiness.embeddingAPI = check.Status
+			report.add(check)
 		} else {
 			report.add(doctorCheck{doctorSkip, "embedding API", "required settings are not ready"})
 		}
 	}
 
+	report.capabilities = readiness.capabilities()
 	failed := report.write(writer)
 	if failed > 0 {
 		return fmt.Errorf("doctor found %d failed check(s)", failed)
@@ -186,11 +205,11 @@ func inspectDatabase(path string) doctorCheck {
 
 func validateHTTPBaseURL(value string) error {
 	if value == "" {
-		return fmt.Errorf("missing; run config set --base-url")
+		return fmt.Errorf("missing; run adl config set --base-url")
 	}
 	parsed, err := url.ParseRequestURI(value)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return fmt.Errorf("invalid HTTP(S) URL %q; run config set --base-url", value)
+		return fmt.Errorf("invalid HTTP(S) URL %q; run adl config set --base-url", value)
 	}
 	return nil
 }
@@ -226,12 +245,62 @@ func (r *doctorReport) addSkippedConfigChecks() {
 	}
 }
 
+func (r doctorReadiness) capabilities() []doctorCheck {
+	local := doctorCheck{doctorPass, "local notes", "required; ready (notes and keyword search)"}
+	if !r.databaseReady {
+		local = doctorCheck{doctorFail, "local notes", "required; unavailable; database is not ready"}
+	}
+
+	return []doctorCheck{
+		local,
+		r.optionalCapability("AI enhancement", "chat model", r.chatModelReady, r.chatAPI),
+		r.optionalCapability("semantic search", "embedding model", r.embeddingModelReady, r.embeddingAPI),
+	}
+}
+
+func (r doctorReadiness) optionalCapability(name, modelName string, modelReady bool, probeStatus doctorStatus) doctorCheck {
+	if !r.databaseReady {
+		return doctorCheck{doctorFail, name, "optional; unavailable; database is not ready"}
+	}
+	if !r.configReady {
+		return doctorCheck{doctorFail, name, "optional; unavailable; configuration could not be loaded"}
+	}
+	if !r.baseURLReady {
+		return doctorCheck{doctorFail, name, "optional; unavailable; LLM base URL is invalid"}
+	}
+
+	var missing []string
+	if !r.apiKeyReady {
+		missing = append(missing, "API key")
+	}
+	if !modelReady {
+		missing = append(missing, modelName)
+	}
+	if len(missing) > 0 {
+		return doctorCheck{doctorWarn, name, "optional; not configured; missing " + strings.Join(missing, ", ")}
+	}
+	if probeStatus == doctorFail {
+		return doctorCheck{doctorFail, name, "optional; unavailable; API check failed"}
+	}
+	if probeStatus == doctorPass {
+		return doctorCheck{doctorPass, name, "optional; configured; API reachable"}
+	}
+	return doctorCheck{doctorPass, name, "optional; configured; online not checked"}
+}
+
 func (r doctorReport) write(writer io.Writer) int {
 	counts := map[doctorStatus]int{}
 	fmt.Fprintln(writer, "ai-dev-logger doctor")
 	for _, check := range r.checks {
 		counts[check.Status]++
 		fmt.Fprintf(writer, "[%-4s] %-16s %s\n", check.Status, check.Name, check.Detail)
+	}
+	// Capability rows summarize existing checks; do not count failures twice.
+	if len(r.capabilities) > 0 {
+		fmt.Fprintln(writer, "\nCapabilities:")
+		for _, capability := range r.capabilities {
+			fmt.Fprintf(writer, "[%-4s] %-16s %s\n", capability.Status, capability.Name, capability.Detail)
+		}
 	}
 	fmt.Fprintf(
 		writer,

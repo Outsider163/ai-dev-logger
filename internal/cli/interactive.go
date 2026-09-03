@@ -64,26 +64,26 @@ func runInteractive(ctx context.Context, input io.Reader, output io.Writer, data
 		if strings.HasPrefix(line, "/") {
 			exit, err := runInteractiveCommand(ctx, output, db, line)
 			if err != nil {
-				fmt.Fprintf(output, "error: %v\n", err)
+				fmt.Fprintf(output, "%s: %v\n", commandErrorPrefix, err)
 				continue
 			}
 			if exit {
-				fmt.Fprintln(output, "bye")
+				fmt.Fprintln(output, "已退出交互模式")
 				return nil
 			}
 			continue
 		}
 
 		if err := saveInteractiveNote(ctx, output, db, line); err != nil {
-			fmt.Fprintf(output, "error: %v\n", err)
+			fmt.Fprintf(output, "%s: %v\n", commandErrorPrefix, err)
 		}
 	}
 }
 
 func printInteractiveWelcome(output io.Writer) {
-	fmt.Fprintln(output, "AI Dev Logger interactive mode")
-	fmt.Fprintln(output, "Type a note and press Enter to save it locally.")
-	fmt.Fprintln(output, "Use #tags at the end of a note. Type /help for commands.")
+	fmt.Fprintln(output, "AI Dev Logger | 本地交互模式")
+	fmt.Fprintln(output, "输入一行笔记后按 Enter 保存，#标签 会自动提取。这里不会调用 AI。")
+	fmt.Fprintln(output, "输入 /help 查看命令，输入 /exit 退出。")
 }
 
 func runInteractiveCommand(
@@ -207,12 +207,14 @@ func parseInteractiveID(argument string) (int64, error) {
 }
 
 func printInteractiveHelp(output io.Writer) {
-	fmt.Fprintln(output, "Commands:")
-	fmt.Fprintln(output, "  /list [limit]  list recent notes")
-	fmt.Fprintln(output, "  /find <query>  search titles, tags, and note text")
-	fmt.Fprintln(output, "  /show <id>     show a complete note")
-	fmt.Fprintln(output, "  /help          show this help")
-	fmt.Fprintln(output, "  /exit          leave interactive mode")
+	fmt.Fprintln(output, "交互命令:")
+	fmt.Fprintln(output, "  /list [limit]  列出最近笔记，默认 10 条，最多 100 条")
+	fmt.Fprintln(output, "  /find <query>  按关键词搜索标题、标签和正文")
+	fmt.Fprintln(output, "  /show <id>     查看一条笔记的完整内容")
+	fmt.Fprintln(output, "  /help          显示帮助")
+	fmt.Fprintln(output, "  /exit          退出交互模式")
+	fmt.Fprintln(output, "示例: 排查了连接超时 #network")
+	fmt.Fprintln(output, "交互命令只在 adl> 提示符后使用；返回系统终端后可运行 adl --help。")
 }
 
 func printInteractiveNotes(output io.Writer, notes []store.Note, emptyMessage string) {

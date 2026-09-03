@@ -12,7 +12,9 @@ var completionNoDescriptions bool
 
 var completionCmd = &cobra.Command{
 	Use:                   "completion [bash|zsh|fish|powershell]",
-	Short:                 "Generate shell completion scripts",
+	Short:                 "生成终端命令补全脚本",
+	Long:                  "支持 Bash、Zsh、Fish 和 PowerShell；脚本输出到标准输出。\n此命令不会自动修改终端配置。",
+	Example:               "  adl completion powershell\n  adl completion powershell --no-descriptions",
 	Args:                  cobra.ExactArgs(1),
 	ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
 	DisableFlagsInUseLine: true,
@@ -26,7 +28,7 @@ func init() {
 		&completionNoDescriptions,
 		"no-descriptions",
 		false,
-		"Disable command descriptions in completion suggestions",
+		"补全建议中不显示命令说明",
 	)
 }
 

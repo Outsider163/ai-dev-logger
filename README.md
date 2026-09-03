@@ -179,6 +179,23 @@ go run . --help
 .\dist\ai-dev-logger.exe
 ```
 
+## 查看命令帮助
+
+帮助页使用中文说明，命令名和参数名保持英文；每个公开命令都提供常用示例。`adl` 与 `ai-dev-logger` 完全等价。
+
+```powershell
+adl --help
+adl add --help
+adl config set --help
+adl help semantic
+```
+
+帮助页会说明需要的配置、是否调用 API，以及删除或恢复的影响。查看帮助不会创建数据库、修改配置或调用 AI。命令出错时，终端会保留具体错误原因，并附上对应的 `adl ... --help` 入口。
+
+交互模式中的 `/help` 只在 `adl>` 提示符后使用；它与系统终端中的 `adl --help` 不同。`setup` 和交互模式提供中文引导；诊断状态（`PASS`、`WARN`、`FAIL`、`SKIP`）、结果字段名和底层服务错误保留原有格式，JSON 导出格式也不变。
+
+从源码体验当前改动时，将以上示例中的 `adl` 替换为 `go run .`；已安装的程序需要升级后才会显示新版帮助。
+
 ## 命令补全
 
 `completion` 命令可以为四种 Shell 生成补全脚本：
@@ -309,6 +326,8 @@ ai-dev-logger config set `
 2. 配置文件中的 `api_key`
 3. `OPENAI_API_KEY` 环境变量
 
+密钥值会去掉首尾空白；只有空格或换行的值视为未设置，继续查找下一个来源。环境变量只影响运行时使用的密钥，不会在修改模型时自动写入配置文件。
+
 查看当前配置：
 
 ```powershell
@@ -316,6 +335,14 @@ ai-dev-logger config show
 ```
 
 `config show` 会显示当前生效的密钥来源，并默认隐藏 API Key 的中间部分。不要把包含真实密钥的配置文件提交到 Git 或发送给其他人。
+
+`config set` 只修改显式传入的字段。例如，只执行 `adl config set --model "your-chat-model"` 会保留已有密钥、API 地址和向量模型。需要清除某项可选配置时，可以传入空值：
+
+```powershell
+adl config set --embedding-model=
+```
+
+`--api-key=` 和 `--model=` 同样可以清空对应字段，但 API 地址不允许设为空。配置文件不存在时，`config show` 只显示默认值，不创建文件；首次执行有效的 `config set` 才会创建配置。已有文件为零字节时也按默认配置处理。没有传入任何修改项、参数不合法或已有配置损坏（非空但无法解析）时，命令会报错，不覆盖原文件。本命令不验证 API 连接，保存后可执行 `adl doctor --online` 检查。
 
 配置项用途：
 
@@ -328,30 +355,44 @@ ai-dev-logger config show
 
 ## 运行环境自检
 
-完成配置后，先执行离线检查：
+安装后即可执行离线检查，不必先配置 AI：
 
 ```powershell
-ai-dev-logger doctor
+adl doctor
 ```
 
 它会检查配置文件、SQLite 数据库、API Key 来源、API 地址格式、聊天模型和 embedding 模型。默认不会访问网络，也不会显示 API Key；数据库文件不存在时会初始化一个空数据库。
+
+报告中的 `Capabilities` 会分别列出三项能力：
+
+| 能力 | 是否必需 | 就绪条件 |
+| --- | --- | --- |
+| `local notes`：本地笔记和关键词搜索 | 必需 | SQLite 数据库可正常打开 |
+| `AI enhancement`：AI 整理和检索结果解读 | 可选 | 本地数据库正常，且 API 地址、API Key 和聊天模型已配置 |
+| `semantic search`：笔记向量化和语义检索 | 可选 | 本地数据库正常，且 API 地址、API Key 和 embedding 模型已配置 |
+
+缺少 API Key 或模型时，对应能力显示 `not configured`，但本地记笔记仍可使用。只配置 DeepSeek 聊天功能时，向量模型未配置不会再导致整个自检失败；聊天和向量能力分别判断，单独使用语义检索不要求聊天模型，只有 `semantic --explain` 的 AI 解读需要它。
 
 检查状态含义：
 
 | 状态 | 含义 |
 | --- | --- |
 | `PASS` | 这一项检查通过 |
-| `WARN` | 可以继续，但需要留意提示 |
-| `FAIL` | 配置或服务存在问题，命令返回非零退出码 |
-| `SKIP` | 前置条件不满足，因此没有执行这一项 |
+| `WARN` | 可选功能未配置等提示，不会让命令返回失败 |
+| `FAIL` | 数据库无法打开、配置文件损坏、API 地址无效或已配置接口调用失败，命令返回非零退出码 |
+| `SKIP` | 没有要求联网，或可选接口的配置不完整，因此没有执行这一项 |
+
+能力汇总中的 `configured; online not checked` 只表示配置齐全，尚未验证接口；`configured; API reachable` 表示本次在线请求也已成功。`Summary` 只统计实际检查项，能力汇总不会重复计数；没有 `FAIL` 时命令退出码为 `0`。
 
 需要真实验证聊天和向量接口时，显式开启在线检查：
 
 ```powershell
-ai-dev-logger doctor --online --timeout 20s
+adl doctor --online --timeout 20s
 ```
 
-在线模式会分别发送一次很小的聊天请求和 embedding 请求，可能产生少量 API 用量。`--timeout` 是每个在线检查的最长等待时间，默认值为 `15s`。
+在线模式只探测已经配置完整的接口；没有配置向量模型时，会跳过 embedding 请求，不影响聊天接口检查。每次探测使用很小的测试内容，可能产生少量 API 用量，遇到临时网络或服务错误时可能重试。`--timeout` 是每个在线检查（包括重试）的最长等待时间，默认值为 `15s`。
+
+`doctor` 不检查已有笔记是否都生成了向量；这项检查使用 `adl status`。
 
 ## 新增笔记
 
@@ -814,7 +855,7 @@ ai-dev-logger embed --all
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check.ps1
 ```
 
-脚本会依次检查 Go 格式、依赖文件、单元测试、静态分析和构建，并在临时目录演练在线安装器、离线安装器、短命令和 PowerShell 补全配置。测试文件保存在被 Git 忽略的 `.tmp\ci` 目录，不会修改真实用户 PATH 或 PowerShell 配置。
+脚本会依次检查 Go 格式、依赖文件、单元测试、静态分析和构建，并在临时目录演练在线安装器、离线安装器、短命令、命令帮助、配置读写与密钥脱敏、无 AI 配置的离线自检和 PowerShell 补全配置。帮助验收会确认帮助页不创建数据库或配置目录；配置验收使用测试密钥，检查局部更新不会把环境变量写回文件，并验证清空向量模型的命令。测试文件保存在被 Git 忽略的 `.tmp\ci` 目录，不会修改真实用户 PATH 或 PowerShell 配置。
 
 仓库中的 `.github/workflows/ci.yml` 会在每次 push、Pull Request 和手工触发时同时运行两条检查链路：Ubuntu 负责通用 Go 质量检查和 Windows 交叉编译，Windows 负责执行完整 `scripts/check.ps1`，真实运行 `.exe` 和两个安装器。测试使用本地临时 HTTP 服务，不需要把真实 API Key 配置到 GitHub Secrets。
 
@@ -835,7 +876,7 @@ go build -trimpath -o dist\ai-dev-logger.exe .
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\package.ps1 `
-  -Version v1.2.1
+  -Version v1.2.2
 ```
 
 脚本要求 Git 工作区干净，并在 `dist` 中生成 Windows ZIP、`install-online.ps1` 和 `checksums.txt`。ZIP 内会校验 `ai-dev-logger.exe`、`install.ps1` 和 `README.md` 三个必需文件，校验文件同时记录 ZIP 与在线安装器的 SHA-256。
@@ -843,8 +884,8 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 确认主分支已经推送且 CI 通过后，维护者可以创建并推送版本标签：
 
 ```powershell
-git tag -a v1.2.1 -m "Release v1.2.1"
-git push origin v1.2.1
+git tag -a v1.2.2 -m "Release v1.2.2"
+git push origin v1.2.2
 ```
 
 `.github/workflows/release.yml` 会先在 Windows Runner 完成相同的安装验收；只有这个门禁通过，Ubuntu 任务才会验证标签、运行质量检查、构建 Windows 二进制、上传固定名称的一键安装器、生成 SHA-256 校验文件，并通过 GitHub 自动生成版本说明。预发布标签如 `v1.2.0-rc.1` 会自动创建为 Pre-release。

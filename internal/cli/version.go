@@ -11,9 +11,10 @@ import (
 )
 
 var versionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Show build version information",
-	Args:  cobra.NoArgs,
+	Use:     "version",
+	Short:   "显示版本和构建信息",
+	Example: "  adl version\n  adl --version",
+	Args:    cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		writeVersion(cmd.OutOrStdout())
 	},

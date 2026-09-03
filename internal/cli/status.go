@@ -11,9 +11,11 @@ import (
 )
 
 var statusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Show note and embedding index status",
-	Args:  cobra.NoArgs,
+	Use:     "status",
+	Short:   "查看笔记和向量索引状态",
+	Long:    "按当前配置的向量模型统计已生成、缺失和过期的向量，不调用 API。\n需要更新向量时运行 adl embed --all。",
+	Example: "  adl status",
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := appconfig.Load(configPath)
 		if err != nil {
@@ -21,7 +23,7 @@ var statusCmd = &cobra.Command{
 		}
 		model := strings.TrimSpace(cfg.LLM.EmbeddingModel)
 		if model == "" {
-			return fmt.Errorf("embedding model is empty, run config set --embedding-model")
+			return fmt.Errorf("embedding model is empty, run adl config set --embedding-model")
 		}
 
 		db, err := store.Open(dbPath)

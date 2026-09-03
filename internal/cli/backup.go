@@ -25,9 +25,11 @@ type backupOptions struct {
 }
 
 var backupCmd = &cobra.Command{
-	Use:   "backup",
-	Short: "Create and verify a complete SQLite backup",
-	Args:  cobra.NoArgs,
+	Use:     "backup",
+	Short:   "创建并校验完整 SQLite 备份",
+	Long:    "备份包含笔记和向量，完成后校验完整性并显示 SHA-256。\n默认拒绝覆盖已有备份文件；API 配置和密钥不包含在数据库备份中。",
+	Example: "  adl backup --output notes-backup.db",
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runBackup(cmd.Context(), cmd.OutOrStdout(), backupOptions{
 			DBPath: dbPath,
@@ -38,8 +40,8 @@ var backupCmd = &cobra.Command{
 }
 
 func init() {
-	backupCmd.Flags().StringVarP(&backupOutput, "output", "o", "", "Backup file path")
-	backupCmd.Flags().BoolVar(&backupForce, "force", false, "Replace an existing backup file")
+	backupCmd.Flags().StringVarP(&backupOutput, "output", "o", "", "备份文件路径")
+	backupCmd.Flags().BoolVar(&backupForce, "force", false, "覆盖已有备份文件")
 	_ = backupCmd.MarkFlagRequired("output")
 }
 

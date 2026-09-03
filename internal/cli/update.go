@@ -18,9 +18,11 @@ var updateBody string
 var updateTags []string
 
 var updateCmd = &cobra.Command{
-	Use:   "update <id>",
-	Short: "Update an existing note",
-	Args:  cobra.ExactArgs(1),
+	Use:     "update <id>",
+	Short:   "修改已有笔记",
+	Long:    "只修改显式指定的字段；--tag 会替换整组标签，而不是追加。\n正文可通过 --body 或管道输入。修改后可用 adl embed <id> 更新向量。",
+	Example: "  adl update 1 --body \"补充排查结果\"\n  adl update 1 --tag go --tag sqlite\n  Get-Content .\\note.md -Raw | adl update 1",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id, err := strconv.ParseInt(args[0], 10, 64)
 		if err != nil || id <= 0 {
@@ -90,9 +92,9 @@ var updateCmd = &cobra.Command{
 }
 
 func init() {
-	updateCmd.Flags().StringVarP(&updateTitle, "title", "t", "", "New note title")
-	updateCmd.Flags().StringVarP(&updateBody, "body", "b", "", "New note body, Markdown is supported")
-	updateCmd.Flags().StringArrayVar(&updateTags, "tag", nil, "Replacement tag, can be used multiple times")
+	updateCmd.Flags().StringVarP(&updateTitle, "title", "t", "", "新的笔记标题")
+	updateCmd.Flags().StringVarP(&updateBody, "body", "b", "", "新的笔记正文，支持 Markdown")
+	updateCmd.Flags().StringArrayVar(&updateTags, "tag", nil, "替换全部标签，可重复传入")
 }
 
 func readStdinIfAvailable() (string, bool, error) {

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,9 +16,9 @@ var configPath string
 
 var rootCmd = &cobra.Command{
 	Use:           "ai-dev-logger [note text]",
-	Short:         "AI development note CLI",
-	Long:          "ai-dev-logger is a local CLI for collecting and searching development notes. Run it without note text to enter interactive mode.",
-	Example:       "  adl \"fixed a SQLite lock issue #sqlite\"\n  adl\n  adl list",
+	Short:         "本地开发笔记与 AI 整理工具",
+	Long:          "ai-dev-logger（短命令 adl）用于记录和检索本地开发笔记。\n直接输入笔记可快速保存；不带参数时进入交互模式。\n本地记录和关键词搜索不需要 API Key，AI 整理和语义检索是可选功能。",
+	Example:       "  adl \"解决了 SQLite 锁冲突 #sqlite\"\n  adl\n  adl list\n  adl search \"SQLite\"\n  adl setup\n  adl doctor",
 	Version:       buildinfo.Version,
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -43,16 +42,17 @@ var quickAddCmd = &cobra.Command{
 }
 
 func Execute() {
+	prepareHelp(rootCmd)
 	rootCmd.SetArgs(normalizeCommandLineArgs(os.Args[1:]))
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	if command, err := rootCmd.ExecuteC(); err != nil {
+		writeCommandError(os.Stderr, command, err)
 		os.Exit(1)
 	}
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&dbPath, "db", defaultDBPath(), "SQLite database path")
-	rootCmd.PersistentFlags().StringVar(&configPath, "config", appconfig.DefaultPath(), "Config file path")
+	rootCmd.PersistentFlags().StringVar(&dbPath, "db", defaultDBPath(), "SQLite 数据库路径")
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", appconfig.DefaultPath(), "配置文件路径")
 
 	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(backupCmd)
