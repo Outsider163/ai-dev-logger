@@ -194,9 +194,17 @@ func runInteractiveCommand(
 		printInteractiveNotes(output, notes, "no matching notes")
 		return false, nil
 	case "show":
-		id, err := interactiveNoteID(command, args)
+		flags := interactiveFlags("show")
+		chunks := flags.Bool("chunks", false, "show chunks")
+		if err := flags.Parse(args); err != nil {
+			return false, err
+		}
+		id, err := interactiveNoteID(command, flags.Args())
 		if err != nil {
 			return false, err
+		}
+		if *chunks {
+			return false, printNoteChunks(ctx, output, db, id)
 		}
 		note, err := db.GetNote(ctx, id)
 		if errors.Is(err, store.ErrNoteNotFound) {
@@ -286,6 +294,7 @@ func printInteractiveHelp(output io.Writer) {
 	fmt.Fprintln(output, "  list [数量]                 列出最近笔记，默认 10 条，最多 100 条")
 	fmt.Fprintln(output, "  search <关键词>             搜索标题、正文和标签，也可用 find")
 	fmt.Fprintln(output, "  show <编号>                 查看完整笔记")
+	fmt.Fprintln(output, "  show <编号> --chunks        查看自动切片")
 	fmt.Fprintln(output, "  update <编号> --body \"正文\" 替换正文，也支持 --title、多个 --tag")
 	fmt.Fprintln(output, "  delete <编号>               核对标题后输入 y 确认，默认取消，不支持 --yes")
 	fmt.Fprintln(output, "  help                        显示帮助")

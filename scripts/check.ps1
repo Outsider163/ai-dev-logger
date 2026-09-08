@@ -364,6 +364,26 @@ try {
     }
 
     $doctorAPIKeyBefore = $env:AI_DEV_LOGGER_API_KEY
+
+    $chunkDBPath = Join-Path $resolvedInstallSmokeDir 'chunk-smoke.db'
+    $longChunkBody = ('a' * 1200) + 'last section'
+    & $installedAliasPath --db $chunkDBPath add --title 'chunk smoke' --body $longChunkBody | Out-Null
+    Assert-LastExitCode 'Chunk creation smoke test'
+    $chunkOutput = @(& $installedAliasPath --db $chunkDBPath show 1 --chunks) -join "`n"
+    Assert-LastExitCode 'Chunk display smoke test'
+    if (-not $chunkOutput.Contains('note #1: 2 chunks') -or
+        -not $chunkOutput.Contains('[Note #1 / Chunk 2]') -or
+        -not $chunkOutput.Contains('last section')) {
+        throw "Long note chunks were not displayed correctly: $chunkOutput"
+    }
+    & $installedAliasPath --db $chunkDBPath update 1 --body 'short body' | Out-Null
+    Assert-LastExitCode 'Chunk rebuild smoke test'
+    $chunkOutput = @(& $installedAliasPath --db $chunkDBPath show 1 --chunks) -join "`n"
+    Assert-LastExitCode 'Rebuilt chunk display smoke test'
+    if (-not $chunkOutput.Contains('note #1: 1 chunks') -or $chunkOutput.Contains('Chunk 2')) {
+        throw "Updating the note left old chunks: $chunkOutput"
+    }
+
     $doctorFallbackKeyBefore = $env:OPENAI_API_KEY
     try {
         $env:AI_DEV_LOGGER_API_KEY = $null

@@ -143,18 +143,16 @@ type embeddingBatchResult struct {
 }
 
 func saveNoteEmbedding(ctx context.Context, db *store.Store, client *llm.Client, model string, note store.Note) (store.NoteEmbedding, error) {
-	text := store.NoteEmbeddingText(note)
-	vector, err := client.CreateEmbedding(ctx, text)
-	if err != nil {
-		return store.NoteEmbedding{}, fmt.Errorf("create embedding for note #%d: %w", note.ID, err)
+	parts := store.SplitNoteBody(note.Body)
+	vectors := make([][]float64, 0, len(parts))
+	for i, part := range parts {
+		vector, err := client.CreateEmbedding(ctx, store.ChunkEmbeddingText(note, part))
+		if err != nil {
+			return store.NoteEmbedding{}, fmt.Errorf("create embedding for note #%d chunk %d/%d: %w", note.ID, i+1, len(parts), err)
+		}
+		vectors = append(vectors, vector)
 	}
-
-	embedding, err := db.UpsertEmbedding(ctx, store.UpsertEmbeddingInput{
-		NoteID: note.ID,
-		Model:  model,
-		Text:   text,
-		Vector: vector,
-	})
+	embedding, err := db.SaveChunkEmbeddings(ctx, note, model, vectors)
 	if err != nil {
 		return store.NoteEmbedding{}, fmt.Errorf("store embedding for note #%d: %w", note.ID, err)
 	}
@@ -235,10 +233,10 @@ func selectNotesForEmbedding(notes []store.Note, embeddings []store.NoteEmbeddin
 		return notes, 0
 	}
 
-	embeddingsByNote := make(map[int64]store.NoteEmbedding, len(embeddings))
+	embeddingsByNote := make(map[int64][]store.NoteEmbedding, len(embeddings))
 	for _, embedding := range embeddings {
 		if embedding.Model == model {
-			embeddingsByNote[embedding.NoteID] = embedding
+			embeddingsByNote[embedding.NoteID] = append(embeddingsByNote[embedding.NoteID], embedding)
 		}
 	}
 
@@ -246,7 +244,7 @@ func selectNotesForEmbedding(notes []store.Note, embeddings []store.NoteEmbeddin
 	skipped := 0
 	for _, note := range notes {
 		embedding, exists := embeddingsByNote[note.ID]
-		if exists && embedding.MatchesText(store.NoteEmbeddingText(note)) {
+		if exists && store.EmbeddingsCurrent(note, embedding, model) {
 			skipped++
 			continue
 		}

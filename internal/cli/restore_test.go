@@ -42,7 +42,7 @@ func TestRunRestoreDryRunDoesNotChangeTarget(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"restore source verified:",
-		"schema version: 1",
+		"schema version: 2",
 		"notes: 2",
 		"embeddings: 1",
 		"target notes: 1",

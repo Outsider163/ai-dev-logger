@@ -91,7 +91,12 @@ func (s *Store) CreateNote(ctx context.Context, input CreateNoteInput) (Note, er
 		return Note{}, err
 	}
 
-	result, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Note{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `
 INSERT INTO notes (title, body, tags_json, summary, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
 `, input.Title, input.Body, string(tagsJSON), input.Summary, formatTime(now), formatTime(now))
@@ -101,6 +106,12 @@ VALUES (?, ?, ?, ?, ?, ?)
 
 	id, err := result.LastInsertId()
 	if err != nil {
+		return Note{}, err
+	}
+	if err := replaceChunks(ctx, tx, id, input.Body); err != nil {
+		return Note{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return Note{}, err
 	}
 
@@ -225,6 +236,9 @@ WHERE id = ?
 
 	// The note text changed, so all of its stored vectors are stale.
 	if err := deleteEmbeddings(ctx, tx, note.ID); err != nil {
+		return Note{}, err
+	}
+	if err := replaceChunks(ctx, tx, note.ID, note.Body); err != nil {
 		return Note{}, err
 	}
 	if err := tx.Commit(); err != nil {

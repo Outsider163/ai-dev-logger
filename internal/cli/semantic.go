@@ -19,8 +19,9 @@ var semanticExplain bool
 var semanticMinScore float64
 
 type semanticMatch struct {
-	note  store.Note
-	score float64
+	chunkIndex int
+	note       store.Note
+	score      float64
 }
 
 type skippedSemanticMatch struct {
@@ -103,6 +104,7 @@ var semanticCmd = &cobra.Command{
 
 		for _, match := range selected {
 			fmt.Printf("#%d  %s  (similarity: %.4f)\n", match.note.ID, match.note.Title, match.score)
+			fmt.Printf("    chunk: %d\n", match.chunkIndex+1)
 			if len(match.note.Tags) > 0 {
 				fmt.Printf("    tags: %s\n", strings.Join(match.note.Tags, ", "))
 			}
@@ -163,14 +165,25 @@ func rankSemanticMatches(queryVector []float64, candidates []store.EmbeddedNote,
 		if score < minScore {
 			continue
 		}
-		matches = append(matches, semanticMatch{note: candidate.Note, score: score})
+		matches = append(matches, semanticMatch{note: candidate.Note, score: score, chunkIndex: candidate.Embedding.ChunkIndex})
 	}
 
 	sort.Slice(matches, func(i, j int) bool {
 		if matches[i].score == matches[j].score {
+			if matches[i].note.ID == matches[j].note.ID {
+				return matches[i].chunkIndex < matches[j].chunkIndex
+			}
 			return matches[i].note.ID < matches[j].note.ID
 		}
 		return matches[i].score > matches[j].score
 	})
-	return matches, skipped
+	unique := make([]semanticMatch, 0, len(matches))
+	seen := make(map[int64]bool)
+	for _, match := range matches {
+		if !seen[match.note.ID] {
+			unique = append(unique, match)
+			seen[match.note.ID] = true
+		}
+	}
+	return unique, skipped
 }

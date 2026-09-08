@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const currentSchemaVersion = 1
+const currentSchemaVersion = 2
 
 type schemaMigration struct {
 	Version int
@@ -44,6 +44,32 @@ CREATE TABLE IF NOT EXISTS note_embeddings (
 CREATE INDEX IF NOT EXISTS idx_note_embeddings_model ON note_embeddings(model);
 `,
 	},
+	{Version: 2, SQL: `
+CREATE TABLE note_chunks (
+ note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+ chunk_index INTEGER NOT NULL CHECK(chunk_index >= 0),
+ content TEXT NOT NULL,
+ content_hash TEXT NOT NULL,
+ PRIMARY KEY(note_id,chunk_index)
+);
+ALTER TABLE note_embeddings RENAME TO legacy_note_embeddings;
+DROP INDEX idx_note_embeddings_model;
+CREATE TABLE note_embeddings (
+ note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+ chunk_index INTEGER NOT NULL DEFAULT 0 CHECK(chunk_index >= 0),
+ model TEXT NOT NULL,
+ dimensions INTEGER NOT NULL,
+ vector_json TEXT NOT NULL,
+ content_hash TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ PRIMARY KEY(note_id,chunk_index,model)
+);
+INSERT INTO note_embeddings(note_id,model,dimensions,vector_json,content_hash,created_at,updated_at)
+SELECT note_id,model,dimensions,vector_json,content_hash,created_at,updated_at FROM legacy_note_embeddings;
+DROP TABLE legacy_note_embeddings;
+CREATE INDEX idx_note_embeddings_model ON note_embeddings(model);
+`},
 }
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -79,6 +105,11 @@ FROM schema_migrations
 		}
 		if _, err := tx.ExecContext(ctx, migration.SQL); err != nil {
 			return fmt.Errorf("apply schema migration %d: %w", migration.Version, err)
+		}
+		if migration.Version == 2 {
+			if err := backfillChunks(ctx, tx); err != nil {
+				return fmt.Errorf("backfill note chunks: %w", err)
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO schema_migrations (version, applied_at)

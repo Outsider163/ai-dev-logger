@@ -15,6 +15,7 @@ import (
 var ErrEmbeddingNotFound = errors.New("embedding not found")
 
 type NoteEmbedding struct {
+	ChunkIndex  int
 	NoteID      int64
 	Model       string
 	Dimensions  int
@@ -24,7 +25,7 @@ type NoteEmbedding struct {
 	UpdatedAt   time.Time
 }
 
-// EmbeddedNote keeps a note and its vector together for semantic search.
+// EmbeddedNote carries note metadata, one chunk in Note.Body, and its vector.
 type EmbeddedNote struct {
 	Note      Note
 	Embedding NoteEmbedding
@@ -36,10 +37,11 @@ func (e NoteEmbedding) MatchesText(text string) bool {
 }
 
 type UpsertEmbeddingInput struct {
-	NoteID int64
-	Model  string
-	Text   string
-	Vector []float64
+	ChunkIndex int
+	NoteID     int64
+	Model      string
+	Text       string
+	Vector     []float64
 }
 
 // EmbeddingStatus describes whether notes are ready for semantic search.
@@ -53,6 +55,9 @@ type EmbeddingStatus struct {
 }
 
 func (s *Store) UpsertEmbedding(ctx context.Context, input UpsertEmbeddingInput) (NoteEmbedding, error) {
+	if input.ChunkIndex < 0 {
+		return NoteEmbedding{}, fmt.Errorf("chunk index must not be negative")
+	}
 	if input.NoteID <= 0 {
 		return NoteEmbedding{}, fmt.Errorf("note id must be positive")
 	}
@@ -75,19 +80,20 @@ func (s *Store) UpsertEmbedding(ctx context.Context, input UpsertEmbeddingInput)
 	contentHash := hashText(input.Text)
 
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO note_embeddings (note_id, model, dimensions, vector_json, content_hash, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(note_id, model) DO UPDATE SET
+INSERT INTO note_embeddings (note_id, chunk_index, model, dimensions, vector_json, content_hash, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(note_id, chunk_index, model) DO UPDATE SET
 	dimensions = excluded.dimensions,
 	vector_json = excluded.vector_json,
 	content_hash = excluded.content_hash,
 	updated_at = excluded.updated_at
-`, input.NoteID, input.Model, len(input.Vector), vectorJSON, contentHash, formatTime(now), formatTime(now))
+`, input.NoteID, input.ChunkIndex, input.Model, len(input.Vector), vectorJSON, contentHash, formatTime(now), formatTime(now))
 	if err != nil {
 		return NoteEmbedding{}, err
 	}
 
 	return NoteEmbedding{
+		ChunkIndex:  input.ChunkIndex,
 		NoteID:      input.NoteID,
 		Model:       input.Model,
 		Dimensions:  len(input.Vector),
@@ -99,11 +105,15 @@ ON CONFLICT(note_id, model) DO UPDATE SET
 }
 
 func (s *Store) GetEmbedding(ctx context.Context, noteID int64, model string) (NoteEmbedding, error) {
+	return s.GetChunkEmbedding(ctx, noteID, 0, model)
+}
+
+func (s *Store) GetChunkEmbedding(ctx context.Context, noteID int64, index int, model string) (NoteEmbedding, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT note_id, model, dimensions, vector_json, content_hash, created_at, updated_at
+SELECT note_id, model, dimensions, vector_json, content_hash, created_at, updated_at, chunk_index
 FROM note_embeddings
-WHERE note_id = ? AND model = ?
-`, noteID, model)
+WHERE note_id = ? AND model = ? AND chunk_index = ?
+`, noteID, model, index)
 
 	embedding, err := scanEmbedding(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -116,7 +126,7 @@ WHERE note_id = ? AND model = ?
 	return embedding, nil
 }
 
-// ListEmbeddings returns all note embeddings created with one model.
+// ListEmbeddings returns all chunk embeddings created with one model.
 // Vectors from different models must not be compared with each other.
 func (s *Store) ListEmbeddings(ctx context.Context, model string) ([]NoteEmbedding, error) {
 	if model == "" {
@@ -124,10 +134,10 @@ func (s *Store) ListEmbeddings(ctx context.Context, model string) ([]NoteEmbeddi
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-SELECT note_id, model, dimensions, vector_json, content_hash, created_at, updated_at
+SELECT note_id, model, dimensions, vector_json, content_hash, created_at, updated_at, chunk_index
 FROM note_embeddings
 WHERE model = ?
-ORDER BY note_id ASC
+ORDER BY note_id ASC, chunk_index ASC
 `, model)
 	if err != nil {
 		return nil, err
@@ -146,7 +156,7 @@ ORDER BY note_id ASC
 	return embeddings, rows.Err()
 }
 
-// ListEmbeddedNotes reads notes and their vectors with one joined query.
+// ListEmbeddedNotes reads chunk bodies and their vectors with one joined query.
 func (s *Store) ListEmbeddedNotes(ctx context.Context, model string) ([]EmbeddedNote, error) {
 	if model == "" {
 		return nil, fmt.Errorf("embedding model is required")
@@ -154,12 +164,13 @@ func (s *Store) ListEmbeddedNotes(ctx context.Context, model string) ([]Embedded
 
 	rows, err := s.db.QueryContext(ctx, `
 SELECT
-	n.id, n.title, n.body, n.tags_json, n.summary, n.created_at, n.updated_at,
-	e.note_id, e.model, e.dimensions, e.vector_json, e.content_hash, e.created_at, e.updated_at
+	n.id, n.title, c.content, n.tags_json, n.summary, n.created_at, n.updated_at,
+	e.note_id, e.model, e.dimensions, e.vector_json, e.content_hash, e.created_at, e.updated_at, e.chunk_index
 FROM note_embeddings AS e
 JOIN notes AS n ON n.id = e.note_id
+JOIN note_chunks AS c ON c.note_id=e.note_id AND c.chunk_index=e.chunk_index
 WHERE e.model = ?
-ORDER BY n.id ASC
+ORDER BY n.id ASC, e.chunk_index ASC
 `, model)
 	if err != nil {
 		return nil, err
@@ -177,7 +188,7 @@ ORDER BY n.id ASC
 	return notes, rows.Err()
 }
 
-// GetEmbeddingStatus classifies each note's embedding for one model.
+// GetEmbeddingStatus classifies notes by completeness of their chunk vectors.
 func (s *Store) GetEmbeddingStatus(ctx context.Context, model string) (EmbeddingStatus, error) {
 	if model == "" {
 		return EmbeddingStatus{}, fmt.Errorf("embedding model is required")
@@ -197,9 +208,9 @@ func (s *Store) GetEmbeddingStatus(ctx context.Context, model string) (Embedding
 		EmbeddingsTotal: len(embeddings),
 		EmbeddingModel:  model,
 	}
-	embeddingsByNote := make(map[int64]NoteEmbedding, len(embeddings))
+	embeddingsByNote := make(map[int64][]NoteEmbedding, len(embeddings))
 	for _, embedding := range embeddings {
-		embeddingsByNote[embedding.NoteID] = embedding
+		embeddingsByNote[embedding.NoteID] = append(embeddingsByNote[embedding.NoteID], embedding)
 	}
 
 	for _, note := range notes {
@@ -208,7 +219,7 @@ func (s *Store) GetEmbeddingStatus(ctx context.Context, model string) (Embedding
 			status.MissingForModel++
 			continue
 		}
-		if !embedding.MatchesText(NoteEmbeddingText(note)) {
+		if !EmbeddingsCurrent(note, embedding, model) {
 			status.StaleForModel++
 			continue
 		}
@@ -277,6 +288,7 @@ func scanEmbedding(scanner embeddingScanner) (NoteEmbedding, error) {
 		&embedding.ContentHash,
 		&createdAt,
 		&updatedAt,
+		&embedding.ChunkIndex,
 	); err != nil {
 		return NoteEmbedding{}, err
 	}
@@ -326,6 +338,7 @@ func scanEmbeddedNote(scanner embeddingScanner) (EmbeddedNote, error) {
 		&item.Embedding.ContentHash,
 		&embeddingCreatedAt,
 		&embeddingUpdatedAt,
+		&item.Embedding.ChunkIndex,
 	); err != nil {
 		return EmbeddedNote{}, err
 	}

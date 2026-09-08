@@ -134,6 +134,9 @@ VALUES (?, ?, ?, ?, ?, ?)
 		if err != nil {
 			return result, fmt.Errorf("read imported note #%d id: %w", input.SourceID, err)
 		}
+		if err := replaceChunks(ctx, tx, newID, input.Body); err != nil {
+			return result, err
+		}
 		result.Imported++
 		if policy != DuplicateAllow {
 			duplicateIDs[contentKey] = newID

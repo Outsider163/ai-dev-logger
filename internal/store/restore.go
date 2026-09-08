@@ -59,6 +59,15 @@ FROM schema_migrations
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM note_embeddings`).Scan(&info.Embeddings); err != nil {
 		return DatabaseInfo{}, fmt.Errorf("count embeddings in database: %w", err)
 	}
+	if info.SchemaVersion >= 2 {
+		var chunks int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(content_hash) FROM note_chunks WHERE chunk_index >= 0`).Scan(&chunks); err != nil {
+			return DatabaseInfo{}, fmt.Errorf("inspect note chunks: %w", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(chunk_index) FROM note_embeddings`).Scan(&chunks); err != nil {
+			return DatabaseInfo{}, fmt.Errorf("inspect chunk embeddings: %w", err)
+		}
+	}
 	if err := verifyForeignKeys(ctx, db); err != nil {
 		return DatabaseInfo{}, err
 	}
