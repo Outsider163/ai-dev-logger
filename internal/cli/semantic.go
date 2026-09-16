@@ -51,11 +51,12 @@ var semanticCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		model := strings.TrimSpace(cfg.LLM.EmbeddingModel)
+		embeddingProvider := cfg.EmbeddingRuntimeProvider()
+		model := strings.TrimSpace(embeddingProvider.Model)
 		if model == "" {
 			return fmt.Errorf("embedding model is empty, run adl config set --embedding-model")
 		}
-		cfg.LLM.EmbeddingModel = model
+		embeddingProvider.Model = model
 
 		db, err := store.Open(dbPath)
 		if err != nil {
@@ -79,7 +80,7 @@ var semanticCmd = &cobra.Command{
 			return fmt.Errorf("no current embeddings found for model %q; run adl embed --all first", model)
 		}
 
-		queryVector, err := llm.NewClient(cfg.LLM).CreateEmbedding(cmd.Context(), query)
+		queryVector, err := llm.NewEmbeddingClient(embeddingProvider).CreateEmbedding(cmd.Context(), query)
 		if err != nil {
 			return fmt.Errorf("create query embedding: %w", err)
 		}
@@ -116,6 +117,7 @@ var semanticCmd = &cobra.Command{
 			for _, match := range selected {
 				contextNotes = append(contextNotes, llm.SearchNote{
 					ID:      match.note.ID,
+					Chunk:   match.chunkIndex + 1,
 					Score:   match.score,
 					Title:   match.note.Title,
 					Tags:    match.note.Tags,
@@ -124,7 +126,7 @@ var semanticCmd = &cobra.Command{
 				})
 			}
 
-			explanation, err := llm.NewClient(cfg.LLM).ExplainSearch(cmd.Context(), query, contextNotes)
+			explanation, err := llm.NewChatClient(cfg.ChatRuntimeProvider()).ExplainSearch(cmd.Context(), query, contextNotes)
 			if err != nil {
 				return fmt.Errorf("explain search results: %w", err)
 			}

@@ -50,7 +50,7 @@ var addCmd = &cobra.Command{
 		}
 
 		if addAI {
-			enhanced, err := llm.NewClient(cfg.LLM).EnhanceNote(cmd.Context(), llm.EnhanceNoteInput{
+			enhanced, err := llm.NewChatClient(cfg.ChatRuntimeProvider()).EnhanceNote(cmd.Context(), llm.EnhanceNoteInput{
 				Title: title,
 				Body:  body,
 				Tags:  tags,
@@ -87,7 +87,8 @@ var addCmd = &cobra.Command{
 
 		fmt.Printf("saved note #%d\n", note.ID)
 		if addEmbed {
-			embedding, err := saveNoteEmbedding(cmd.Context(), db, llm.NewClient(cfg.LLM), cfg.LLM.EmbeddingModel, note)
+			embeddingProvider := cfg.EmbeddingRuntimeProvider()
+			embedding, err := saveNoteEmbedding(cmd.Context(), db, llm.NewEmbeddingClient(embeddingProvider), embeddingProvider.Model, note)
 			if err != nil {
 				return fmt.Errorf("note #%d was saved, but its embedding failed: %w", note.ID, err)
 			}

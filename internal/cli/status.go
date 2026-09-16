@@ -21,7 +21,7 @@ var statusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		model := strings.TrimSpace(cfg.LLM.EmbeddingModel)
+		model := strings.TrimSpace(cfg.EmbeddingProvider().Model)
 		if model == "" {
 			return fmt.Errorf("embedding model is empty, run adl config set --embedding-model")
 		}

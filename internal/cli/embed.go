@@ -34,11 +34,12 @@ var embedCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		model := strings.TrimSpace(cfg.LLM.EmbeddingModel)
+		embeddingProvider := cfg.EmbeddingRuntimeProvider()
+		model := strings.TrimSpace(embeddingProvider.Model)
 		if model == "" {
 			return fmt.Errorf("embedding model is empty, run adl config set --embedding-model")
 		}
-		cfg.LLM.EmbeddingModel = model
+		embeddingProvider.Model = model
 
 		db, err := store.Open(dbPath)
 		if err != nil {
@@ -89,7 +90,7 @@ var embedCmd = &cobra.Command{
 			return nil
 		}
 
-		client := llm.NewClient(cfg.LLM)
+		client := llm.NewEmbeddingClient(embeddingProvider)
 		if err := client.ValidateEmbeddingConfig(); err != nil {
 			return err
 		}

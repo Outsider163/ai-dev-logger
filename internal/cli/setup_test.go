@@ -66,13 +66,13 @@ func TestRunSetupTestsThenSavesDeepSeekConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load saved config: %v", err)
 	}
-	want := appconfig.LLMConfig{
+	want := appconfig.ProviderConfig{
 		APIKey:  "test-key",
 		BaseURL: server.URL,
 		Model:   "test-chat-model",
 	}
-	if !reflect.DeepEqual(cfg.LLM, want) {
-		t.Fatalf("saved config = %#v, want %#v", cfg.LLM, want)
+	if !reflect.DeepEqual(cfg.Chat, want) {
+		t.Fatalf("saved chat config = %#v, want %#v", cfg.Chat, want)
 	}
 	if !strings.Contains(output.String(), "connection test: passed") {
 		t.Fatalf("unexpected output:\n%s", output.String())
@@ -127,7 +127,7 @@ func TestRunSetupFailureDoesNotOverwriteConfig(t *testing.T) {
 	}
 }
 
-func TestRunSetupUsesDeepSeekDefaultsAndClearsEmbeddingModel(t *testing.T) {
+func TestRunSetupUsesDeepSeekDefaultsAndPreservesEmbeddingProfile(t *testing.T) {
 	t.Setenv(appconfig.EnvAPIKey, "")
 	t.Setenv(appconfig.OpenAIAPIKeyEnv, "")
 
@@ -155,11 +155,11 @@ func TestRunSetupUsesDeepSeekDefaultsAndClearsEmbeddingModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load saved config: %v", err)
 	}
-	if cfg.LLM.BaseURL != deepSeekBaseURL || cfg.LLM.Model != deepSeekDefaultModel {
-		t.Fatalf("unexpected defaults: %#v", cfg.LLM)
+	if cfg.Chat.BaseURL != deepSeekBaseURL || cfg.Chat.Model != deepSeekDefaultModel {
+		t.Fatalf("unexpected chat defaults: %#v", cfg.Chat)
 	}
-	if cfg.LLM.EmbeddingModel != "" {
-		t.Fatalf("embedding model was not cleared: %q", cfg.LLM.EmbeddingModel)
+	if cfg.Embedding.Model != "stale-embedding-model" {
+		t.Fatalf("embedding model changed: %q", cfg.Embedding.Model)
 	}
 	if !strings.Contains(output.String(), "connection test: skipped") {
 		t.Fatalf("unexpected output:\n%s", output.String())

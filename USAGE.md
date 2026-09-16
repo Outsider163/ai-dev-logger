@@ -2,9 +2,9 @@
 
 适用版本：当前源码（含未发布的交互增删改查改进）。本文只讲日常操作，不讲源码。
 
-**版本提醒：已安装的 v1.2.2 不会因本地源码修改而自动更新。第 7 节的新交互命令需要运行新版源码；在项目根目录执行 `go run .` 即可体验。第 2 至第 6 节的 PowerShell 用法同样适用于 v1.2.2。**
+**版本提醒：已安装的 v1.2.2 不会因本地源码修改而自动更新。第 7 节的新交互命令和第 8 节的知识库问答需要运行新版源码；在项目根目录执行 `go run .` 即可体验。第 2 至第 6 节的 PowerShell 用法同样适用于 v1.2.2。**
 
-普通的新增、删除、修改、查看和关键词搜索都在本地进行，不需要 DeepSeek 密钥，也不会调用 AI。
+普通的新增、删除、修改、查看和关键词搜索都在本地进行，不需要任何模型密钥，也不会调用 AI。
 
 ## 1. 先确认自己在哪个窗口
 
@@ -36,6 +36,8 @@
 | 查：最近列表 | `adl list` | 默认显示最近 20 条 |
 | 查：完整内容 | `adl show 1` | 按编号查看完整笔记 |
 | 查：关键词搜索 | `adl search "map"` | 在标题、正文和标签中匹配关键词 |
+| 查：语义搜索 | `adl semantic "如何初始化 map"` | 先生成向量，再按含义匹配 |
+| 问：知识库回答 | `adl ask "map 为什么写入失败？"` | 检索本地片段、生成回答并引用来源 |
 | 改：标题 | `adl update 1 --title "新的标题"` | 其他字段保持原值 |
 | 改：正文 | `adl update 1 --body "新的完整正文"` | 替换整段正文，不是追加 |
 | 改：标签 | `adl update 1 --tag go --tag sqlite` | 用这两个标签替换全部原标签 |
@@ -283,7 +285,54 @@ v1.2.2 在 `adl>` 中输入 `list` 或 `adl list` 会当作笔记保存；它需
 
 截图中误存的两条笔记编号当时是 `4` 和 `5`。这并不意味着现在可以直接删除这两个编号：先在 PowerShell 执行 `adl show 4`、`adl show 5`，确认仍然是那两条误记，再按第 6 节操作。本指南不会自动删除它们。
 
-## 8. 常见问题
+## 8. 从笔记到知识库问答
+
+普通笔记变成可问答的知识库，需要走完“记录 -> 切片 -> 向量化 -> 检索 -> 回答”这条链路。切片由程序自动完成；你需要配置服务、生成向量，然后再提问。
+
+### 8.1 配置两套模型服务
+
+聊天服务负责组织最终答案，向量服务负责查找相关笔记。它们可以来自不同供应商，但接口分别要兼容 OpenAI Chat Completions 和 Embeddings 格式。
+
+```powershell
+$env:AI_DEV_LOGGER_CHAT_API_KEY="your-chat-api-key"
+$env:AI_DEV_LOGGER_EMBEDDING_API_KEY="your-embedding-api-key"
+
+adl config set --chat-base-url "https://your-chat-provider.example/v1" --chat-model "your-chat-model"
+adl config set --embedding-base-url "https://your-embedding-provider.example/v1" --embedding-model "your-embedding-model"
+adl doctor --online
+```
+
+`doctor --online` 会分别检查两套接口。密钥只对当前 PowerShell 窗口生效；长期配置方法和完整优先级见 [README.md](README.md) 的“配置模型”一节。
+
+### 8.2 为笔记建立索引
+
+```powershell
+adl embed --all
+adl status
+```
+
+`embed --all` 会读取每条笔记的自动切片，调用向量服务，并把返回的向量保存在本地 SQLite 中。`status` 中 `notes with current embeddings` 等于笔记总数时，说明当前模型下的索引已经完整。新增笔记时也可以使用 `adl add --embed ...` 立即建立索引。
+
+### 8.3 向自己的笔记提问
+
+```powershell
+adl ask "以前如何处理 SQLite 锁冲突？"
+adl ask "Go map 并发读写怎么处理？" --limit 3 --min-score 0.4
+```
+
+输出先列出 `Sources`，再显示 `Answer`。答案中的 `[Note #编号]` 对应真实命中的本地笔记，可继续执行 `adl show 编号` 查看完整原文。`--limit` 控制最多提供几条笔记，`--min-score` 控制最低相似度；阈值越高，资料通常越严格，但也越可能找不到结果。
+
+### 8.4 这条链路内部做了什么
+
+1. 问题被向量服务转换为一组数字。
+2. 程序在本地比较问题向量和笔记片段向量。
+3. 同一笔记只保留最相关片段，再选择得分最高的几条笔记。
+4. 程序把问题和这些片段发给聊天服务，要求它只依据资料回答并引用笔记编号。
+5. 如果没有片段达到阈值，程序不会调用聊天服务，也不会凭空生成答案。
+
+原始数据库、未命中的笔记和全部向量不会上传；模型服务只会收到当前问题和本次选中的片段。调用外部服务仍可能产生费用，敏感内容应根据供应商的数据政策决定是否使用。
+
+## 9. 常见问题
 
 ### 如何查看笔记切片
 
@@ -318,6 +367,8 @@ adl add --ai --title "Go map 记录" --body "map 没初始化就写入报错了�
 ```
 
 这会把笔记内容发送给配置的模型服务，可能产生 API 费用。普通 `adl "内容"`、交互模式和 `update` 不会自动调用 AI。
+
+`setup` 只配置聊天服务。要使用 `semantic` 或 `ask`，还要按第 8.1 节配置向量服务并执行 `adl embed --all`。
 
 ### 想查看命令的所有参数
 

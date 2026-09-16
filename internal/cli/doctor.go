@@ -50,14 +50,18 @@ type doctorReport struct {
 }
 
 type doctorReadiness struct {
-	databaseReady       bool
-	configReady         bool
-	apiKeyReady         bool
-	baseURLReady        bool
-	chatModelReady      bool
-	embeddingModelReady bool
-	chatAPI             doctorStatus
-	embeddingAPI        doctorStatus
+	databaseReady bool
+	configReady   bool
+	legacyConfig  bool
+	chat          providerReadiness
+	embedding     providerReadiness
+}
+
+type providerReadiness struct {
+	apiKeyReady  bool
+	baseURLReady bool
+	modelReady   bool
+	apiStatus    doctorStatus
 }
 
 var doctorCmd = &cobra.Command{
@@ -94,45 +98,18 @@ func runDoctor(ctx context.Context, writer io.Writer, options doctorOptions) err
 	readiness := doctorReadiness{
 		databaseReady: databaseCheck.Status == doctorPass,
 		configReady:   configReady,
+		legacyConfig:  true,
 	}
 
 	if !configReady {
-		report.addSkippedConfigChecks()
+		report.addSkippedLegacyConfigChecks()
 	} else {
-		apiKey, apiKeySource := appconfig.ResolveAPIKey(cfg.LLM.APIKey)
-		readiness.apiKeyReady = apiKey != ""
-		if readiness.apiKeyReady {
-			report.add(doctorCheck{doctorPass, "API key", "configured via " + apiKeySource})
+		if cfg.HasProviderProfiles() {
+			readiness.legacyConfig = false
+			readiness.chat = inspectProvider(&report, "chat", cfg.ChatProvider(), appconfig.ResolveChatAPIKey)
+			readiness.embedding = inspectProvider(&report, "embedding", cfg.EmbeddingProvider(), appconfig.ResolveEmbeddingAPIKey)
 		} else {
-			report.add(doctorCheck{
-				Status: doctorWarn,
-				Name:   "API key",
-				Detail: "not configured (optional); set " + appconfig.EnvAPIKey + " or run adl config set --api-key",
-			})
-		}
-
-		baseURL := strings.TrimSpace(cfg.LLM.BaseURL)
-		if err := validateHTTPBaseURL(baseURL); err != nil {
-			report.add(doctorCheck{doctorFail, "LLM base URL", err.Error()})
-		} else {
-			readiness.baseURLReady = true
-			report.add(doctorCheck{doctorPass, "LLM base URL", baseURL})
-		}
-
-		chatModel := strings.TrimSpace(cfg.LLM.Model)
-		readiness.chatModelReady = chatModel != ""
-		if readiness.chatModelReady {
-			report.add(doctorCheck{doctorPass, "chat model", chatModel})
-		} else {
-			report.add(doctorCheck{doctorWarn, "chat model", "not configured (optional); run adl setup or adl config set --model"})
-		}
-
-		embeddingModel := strings.TrimSpace(cfg.LLM.EmbeddingModel)
-		readiness.embeddingModelReady = embeddingModel != ""
-		if readiness.embeddingModelReady {
-			report.add(doctorCheck{doctorPass, "embedding model", embeddingModel})
-		} else {
-			report.add(doctorCheck{doctorWarn, "embedding model", "not configured (optional); needed for semantic search; run adl config set --embedding-model"})
+			readiness.chat, readiness.embedding = inspectLegacyLLM(&report, cfg.LLM)
 		}
 	}
 
@@ -146,17 +123,16 @@ func runDoctor(ctx context.Context, writer io.Writer, options doctorOptions) err
 		report.add(doctorCheck{doctorSkip, "chat API", "configuration could not be loaded"})
 		report.add(doctorCheck{doctorSkip, "embedding API", "configuration could not be loaded"})
 	} else {
-		client := llm.NewClient(cfg.LLM)
-		if readiness.apiKeyReady && readiness.baseURLReady && readiness.chatModelReady {
-			check := probeChat(ctx, client, options.Timeout)
-			readiness.chatAPI = check.Status
+		if readiness.chat.ready() {
+			check := probeChat(ctx, llm.NewChatClient(cfg.ChatRuntimeProvider()), options.Timeout)
+			readiness.chat.apiStatus = check.Status
 			report.add(check)
 		} else {
 			report.add(doctorCheck{doctorSkip, "chat API", "required settings are not ready"})
 		}
-		if readiness.apiKeyReady && readiness.baseURLReady && readiness.embeddingModelReady {
-			check := probeEmbedding(ctx, client, options.Timeout)
-			readiness.embeddingAPI = check.Status
+		if readiness.embedding.ready() {
+			check := probeEmbedding(ctx, llm.NewEmbeddingClient(cfg.EmbeddingRuntimeProvider()), options.Timeout)
+			readiness.embedding.apiStatus = check.Status
 			report.add(check)
 		} else {
 			report.add(doctorCheck{doctorSkip, "embedding API", "required settings are not ready"})
@@ -169,6 +145,69 @@ func runDoctor(ctx context.Context, writer io.Writer, options doctorOptions) err
 		return fmt.Errorf("doctor found %d failed check(s)", failed)
 	}
 	return nil
+}
+
+func inspectLegacyLLM(report *doctorReport, cfg appconfig.LLMConfig) (providerReadiness, providerReadiness) {
+	ready := providerReadiness{}
+	apiKey, source := appconfig.ResolveAPIKey(cfg.APIKey)
+	ready.apiKeyReady = apiKey != ""
+	if ready.apiKeyReady {
+		report.add(doctorCheck{doctorPass, "API key", "configured via " + source})
+	} else {
+		report.add(doctorCheck{doctorWarn, "API key", "not configured (optional); set " + appconfig.EnvAPIKey + " or run adl config set --api-key"})
+	}
+	baseURL := strings.TrimSpace(cfg.BaseURL)
+	if err := validateHTTPBaseURL(baseURL); err != nil {
+		report.add(doctorCheck{doctorFail, "LLM base URL", err.Error()})
+	} else {
+		ready.baseURLReady = true
+		report.add(doctorCheck{doctorPass, "LLM base URL", baseURL})
+	}
+	chatReady := ready
+	chatReady.modelReady = strings.TrimSpace(cfg.Model) != ""
+	if chatReady.modelReady {
+		report.add(doctorCheck{doctorPass, "chat model", strings.TrimSpace(cfg.Model)})
+	} else {
+		report.add(doctorCheck{doctorWarn, "chat model", "not configured (optional); run adl setup or adl config set --model"})
+	}
+	embeddingReady := ready
+	embeddingReady.modelReady = strings.TrimSpace(cfg.EmbeddingModel) != ""
+	if embeddingReady.modelReady {
+		report.add(doctorCheck{doctorPass, "embedding model", strings.TrimSpace(cfg.EmbeddingModel)})
+	} else {
+		report.add(doctorCheck{doctorWarn, "embedding model", "not configured (optional); needed for semantic search; run adl config set --embedding-model"})
+	}
+	return chatReady, embeddingReady
+}
+
+func inspectProvider(report *doctorReport, name string, provider appconfig.ProviderConfig, resolveKey func(string) (string, string)) providerReadiness {
+	ready := providerReadiness{}
+	apiKey, source := resolveKey(provider.APIKey)
+	ready.apiKeyReady = apiKey != ""
+	if ready.apiKeyReady {
+		report.add(doctorCheck{doctorPass, name + " API key", "configured via " + source})
+	} else {
+		report.add(doctorCheck{doctorWarn, name + " API key", "not configured (optional); set a specific environment variable or use adl config set"})
+	}
+	baseURL := strings.TrimSpace(provider.BaseURL)
+	if err := validateHTTPBaseURL(baseURL); err != nil {
+		report.add(doctorCheck{doctorFail, name + " base URL", err.Error()})
+	} else {
+		ready.baseURLReady = true
+		report.add(doctorCheck{doctorPass, name + " base URL", baseURL})
+	}
+	model := strings.TrimSpace(provider.Model)
+	ready.modelReady = model != ""
+	if ready.modelReady {
+		report.add(doctorCheck{doctorPass, name + " model", model})
+	} else {
+		report.add(doctorCheck{doctorWarn, name + " model", "not configured (optional); run adl config set"})
+	}
+	return ready
+}
+
+func (r providerReadiness) ready() bool {
+	return r.apiKeyReady && r.baseURLReady && r.modelReady
 }
 
 func inspectConfig(path string) (appconfig.Config, bool, doctorCheck) {
@@ -239,7 +278,7 @@ func (r *doctorReport) add(check doctorCheck) {
 	r.checks = append(r.checks, check)
 }
 
-func (r *doctorReport) addSkippedConfigChecks() {
+func (r *doctorReport) addSkippedLegacyConfigChecks() {
 	for _, name := range []string{"API key", "LLM base URL", "chat model", "embedding model"} {
 		r.add(doctorCheck{doctorSkip, name, "configuration could not be loaded"})
 	}
@@ -253,36 +292,46 @@ func (r doctorReadiness) capabilities() []doctorCheck {
 
 	return []doctorCheck{
 		local,
-		r.optionalCapability("AI enhancement", "chat model", r.chatModelReady, r.chatAPI),
-		r.optionalCapability("semantic search", "embedding model", r.embeddingModelReady, r.embeddingAPI),
+		r.optionalCapability("AI enhancement", r.chat),
+		r.optionalCapability("semantic search", r.embedding),
 	}
 }
 
-func (r doctorReadiness) optionalCapability(name, modelName string, modelReady bool, probeStatus doctorStatus) doctorCheck {
+func (r doctorReadiness) optionalCapability(name string, provider providerReadiness) doctorCheck {
 	if !r.databaseReady {
 		return doctorCheck{doctorFail, name, "optional; unavailable; database is not ready"}
 	}
 	if !r.configReady {
 		return doctorCheck{doctorFail, name, "optional; unavailable; configuration could not be loaded"}
 	}
-	if !r.baseURLReady {
+	if r.legacyConfig && !provider.baseURLReady {
 		return doctorCheck{doctorFail, name, "optional; unavailable; LLM base URL is invalid"}
 	}
-
+	modelName := "model"
+	if r.legacyConfig {
+		if name == "AI enhancement" {
+			modelName = "chat model"
+		} else {
+			modelName = "embedding model"
+		}
+	}
 	var missing []string
-	if !r.apiKeyReady {
+	if !provider.apiKeyReady {
 		missing = append(missing, "API key")
 	}
-	if !modelReady {
+	if !provider.baseURLReady {
+		missing = append(missing, "base URL")
+	}
+	if !provider.modelReady {
 		missing = append(missing, modelName)
 	}
 	if len(missing) > 0 {
 		return doctorCheck{doctorWarn, name, "optional; not configured; missing " + strings.Join(missing, ", ")}
 	}
-	if probeStatus == doctorFail {
+	if provider.apiStatus == doctorFail {
 		return doctorCheck{doctorFail, name, "optional; unavailable; API check failed"}
 	}
-	if probeStatus == doctorPass {
+	if provider.apiStatus == doctorPass {
 		return doctorCheck{doctorPass, name, "optional; configured; API reachable"}
 	}
 	return doctorCheck{doctorPass, name, "optional; configured; online not checked"}

@@ -233,8 +233,9 @@ try {
     $helpRequests = @(
         @{ Arguments = @(); Marker = 'adl list' }
         @{ Arguments = @('add'); Marker = 'adl add --title' }
-        @{ Arguments = @('config', 'set'); Marker = 'adl config set --model' }
+        @{ Arguments = @('config', 'set'); Marker = 'adl config set --chat-base-url' }
         @{ Arguments = @('doctor'); Marker = 'adl doctor --online' }
+        @{ Arguments = @('ask'); Marker = 'adl ask "' }
         @{ Arguments = @('restore'); Marker = 'adl restore --input' }
     )
     foreach ($request in $helpRequests) {
@@ -255,9 +256,13 @@ try {
     $configSmokeDir = Join-Path $buildDir ('config-smoke-' + [Guid]::NewGuid().ToString('N'))
     $configSmokePath = Join-Path $configSmokeDir 'config.json'
     $configAPIKeyBefore = $env:AI_DEV_LOGGER_API_KEY
+    $configChatAPIKeyBefore = $env:AI_DEV_LOGGER_CHAT_API_KEY
+    $configEmbeddingAPIKeyBefore = $env:AI_DEV_LOGGER_EMBEDDING_API_KEY
     $configFallbackKeyBefore = $env:OPENAI_API_KEY
     try {
         $env:AI_DEV_LOGGER_API_KEY = 'environment-test-key-5678'
+        $env:AI_DEV_LOGGER_CHAT_API_KEY = $null
+        $env:AI_DEV_LOGGER_EMBEDDING_API_KEY = $null
         $env:OPENAI_API_KEY = 'fallback-test-key-9012'
         & $installedAliasPath --config $configSmokePath config show | Out-Null
         Assert-LastExitCode 'Missing config display smoke test'
@@ -299,9 +304,52 @@ try {
             $clearedConfig.llm.api_key -ne 'stored-test-key-1234') {
             throw 'Clearing the embedding model changed other configuration fields'
         }
+
+        & $installedAliasPath --config $configSmokePath config set `
+            --chat-api-key 'chat-profile-key-2468' `
+            --chat-base-url 'https://chat.example.test/v1/' `
+            --chat-model 'profile-chat' `
+            --embedding-api-key 'embedding-profile-key-1357' `
+            --embedding-base-url 'https://embedding.example.test/v1/' `
+            --embedding-model 'profile-embedding' | Out-Null
+        Assert-LastExitCode 'Independent provider configuration smoke test'
+        $providerConfig = Get-Content -Raw -LiteralPath $configSmokePath | ConvertFrom-Json
+        if ($providerConfig.chat.api_key -ne 'chat-profile-key-2468' -or
+            $providerConfig.chat.base_url -ne 'https://chat.example.test/v1' -or
+            $providerConfig.chat.model -ne 'profile-chat' -or
+            $providerConfig.embedding.api_key -ne 'embedding-profile-key-1357' -or
+            $providerConfig.embedding.base_url -ne 'https://embedding.example.test/v1' -or
+            $providerConfig.embedding.model -ne 'profile-embedding') {
+            throw 'Chat and embedding provider profiles were not stored independently'
+        }
+
+        $profileOutput = @(& $installedAliasPath --config $configSmokePath config show) -join "`n"
+        Assert-LastExitCode 'Independent provider display smoke test'
+        if (-not $profileOutput.Contains('chat.api_key: chat...2468') -or
+            -not $profileOutput.Contains('chat.api_key_source: config file') -or
+            -not $profileOutput.Contains('embedding.api_key: embe...1357') -or
+            -not $profileOutput.Contains('embedding.api_key_source: config file') -or
+            $profileOutput.Contains('environment-test-key-5678')) {
+            throw 'A legacy shared environment key incorrectly overrode a provider profile'
+        }
+
+        $env:AI_DEV_LOGGER_CHAT_API_KEY = 'chat-environment-key-8642'
+        $env:AI_DEV_LOGGER_EMBEDDING_API_KEY = 'embedding-environment-key-9753'
+        $providerEnvironmentOutput = @(& $installedAliasPath --config $configSmokePath config show) -join "`n"
+        Assert-LastExitCode 'Provider environment key smoke test'
+        if (-not $providerEnvironmentOutput.Contains('chat.api_key: chat...8642') -or
+            -not $providerEnvironmentOutput.Contains('chat.api_key_source: AI_DEV_LOGGER_CHAT_API_KEY') -or
+            -not $providerEnvironmentOutput.Contains('embedding.api_key: embe...9753') -or
+            -not $providerEnvironmentOutput.Contains('embedding.api_key_source: AI_DEV_LOGGER_EMBEDDING_API_KEY') -or
+            $providerEnvironmentOutput.Contains('chat-environment-key-8642') -or
+            $providerEnvironmentOutput.Contains('embedding-environment-key-9753')) {
+            throw 'Provider-specific environment keys were not applied and masked independently'
+        }
     }
     finally {
         $env:AI_DEV_LOGGER_API_KEY = $configAPIKeyBefore
+        $env:AI_DEV_LOGGER_CHAT_API_KEY = $configChatAPIKeyBefore
+        $env:AI_DEV_LOGGER_EMBEDDING_API_KEY = $configEmbeddingAPIKeyBefore
         $env:OPENAI_API_KEY = $configFallbackKeyBefore
     }
 

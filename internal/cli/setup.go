@@ -64,27 +64,28 @@ func runSetup(ctx context.Context, options setupOptions) error {
 		return err
 	}
 
-	fmt.Fprintln(options.Output, "AI Dev Logger | DeepSeek 配置")
+	fmt.Fprintln(options.Output, "AI Dev Logger | DeepSeek 聊天配置")
 	fmt.Fprintln(options.Output, "新输入的 API Key 会保存在本地配置文件中；直接回车可采用方括号中的默认值。")
 
 	reader := bufio.NewReader(options.Input)
-	effectiveKey, _ := appconfig.ResolveAPIKey(cfg.LLM.APIKey)
+	cfg.MaterializeProviderProfiles()
+	effectiveKey, _ := appconfig.ResolveChatAPIKey(cfg.Chat.APIKey)
 	apiKey, err := readSetupSecret(options.Input, reader, options.Output, effectiveKey != "")
 	if err != nil {
 		return err
 	}
 	if apiKey != "" {
-		cfg.LLM.APIKey = apiKey
+		cfg.Chat.APIKey = apiKey
 	}
 
-	effectiveKey, keySource := appconfig.ResolveAPIKey(cfg.LLM.APIKey)
+	effectiveKey, keySource := appconfig.ResolveChatAPIKey(cfg.Chat.APIKey)
 	if effectiveKey == "" {
 		return fmt.Errorf("DeepSeek API key is required")
 	}
 
 	baseURLDefault := deepSeekBaseURL
-	currentBaseURL := strings.TrimRight(strings.TrimSpace(cfg.LLM.BaseURL), "/")
-	if currentBaseURL != "" && currentBaseURL != appconfig.Default().LLM.BaseURL {
+	currentBaseURL := strings.TrimRight(strings.TrimSpace(cfg.Chat.BaseURL), "/")
+	if currentBaseURL != "" && currentBaseURL != appconfig.Default().ChatProvider().BaseURL {
 		baseURLDefault = currentBaseURL
 	}
 	baseURL, err := readSetupPrompt(reader, options.Output, "DeepSeek API 地址", baseURLDefault)
@@ -97,7 +98,7 @@ func runSetup(ctx context.Context, options setupOptions) error {
 	}
 
 	modelDefault := deepSeekDefaultModel
-	if currentModel := strings.TrimSpace(cfg.LLM.Model); strings.HasPrefix(currentModel, "deepseek-") {
+	if currentModel := strings.TrimSpace(cfg.Chat.Model); strings.HasPrefix(currentModel, "deepseek-") {
 		modelDefault = currentModel
 	}
 	model, err := readSetupPrompt(reader, options.Output, "DeepSeek 聊天模型", modelDefault)
@@ -109,18 +110,15 @@ func runSetup(ctx context.Context, options setupOptions) error {
 		return fmt.Errorf("DeepSeek chat model is required")
 	}
 
-	cfg.LLM.BaseURL = baseURL
-	cfg.LLM.Model = model
-	if isOfficialDeepSeekBaseURL(baseURL) {
-		cfg.LLM.EmbeddingModel = ""
-	}
+	cfg.Chat.BaseURL = baseURL
+	cfg.Chat.Model = model
 
 	if options.SkipTest {
 		fmt.Fprintln(options.Output, "connection test: skipped")
 	} else {
 		fmt.Fprintln(options.Output, "正在验证 DeepSeek 聊天接口，可能产生少量 API 用量...")
 		probeContext, cancel := context.WithTimeout(ctx, options.Timeout)
-		err := llm.NewClient(cfg.LLM).ProbeChat(probeContext)
+		err := llm.NewChatClient(cfg.Chat).ProbeChat(probeContext)
 		cancel()
 		if err != nil {
 			return fmt.Errorf("DeepSeek chat test failed; configuration was not saved: %w", err)
@@ -134,9 +132,9 @@ func runSetup(ctx context.Context, options setupOptions) error {
 
 	fmt.Fprintf(options.Output, "saved config: %s\n", options.ConfigPath)
 	fmt.Fprintf(options.Output, "API key source: %s\n", keySource)
-	fmt.Fprintf(options.Output, "chat model: %s\n", cfg.LLM.Model)
+	fmt.Fprintf(options.Output, "chat model: %s\n", cfg.Chat.Model)
 	if isOfficialDeepSeekBaseURL(baseURL) {
-		fmt.Fprintln(options.Output, "embedding model: not configured (DeepSeek chat setup only)")
+		fmt.Fprintln(options.Output, "embedding service: unchanged (DeepSeek chat setup only)")
 	}
 	fmt.Fprintln(options.Output, "下一步: adl add --ai --title \"测试笔记\" --body \"记录一次问题排查\"")
 	return nil

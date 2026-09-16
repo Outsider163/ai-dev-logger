@@ -4,7 +4,7 @@
 
 `ai-dev-logger` 是一个面向程序员的本地 CLI 开发日志助手，用来记录学习笔记、代码片段和踩坑经验。
 
-数据保存在本地 SQLite 数据库中。你可以使用关键词搜索，也可以调用兼容 OpenAI API 的模型完成笔记润色、标签生成、摘要生成、语义检索和检索结果解读。
+数据保存在本地 SQLite 数据库中。你可以使用关键词搜索，也可以分别配置兼容 OpenAI API 的聊天与向量服务，完成笔记润色、标签生成、摘要生成、语义检索和带来源引用的知识问答。
 
 ## 功能
 
@@ -16,6 +16,8 @@
 - 自动为长笔记切片，按片段生成向量并检索，使用 `show <id> --chunks` 查看
 - 使用自然语言进行本地向量相似度检索
 - 使用最低相似度过滤结果，并让 AI 解读引用本地笔记编号
+- 使用 `ask` 先检索本地笔记，再根据命中片段回答问题并列出来源
+- 聊天模型与 embedding 模型可使用不同供应商、API 地址和密钥
 - 检查、增量更新和强制重建笔记向量索引
 - 使用 `doctor` 定位配置、数据库和模型接口问题
 - 将全部笔记导出为适合阅读的 Markdown 或结构化 JSON
@@ -30,7 +32,8 @@
 - Windows 10 或 Windows 11
 - 从源码运行或构建时需要 Go 1.22 或更高版本
 - 普通笔记与关键词搜索不需要 API Key
-- AI 和语义检索功能需要兼容 OpenAI API 的聊天模型与 embedding 模型
+- AI 功能需要兼容 OpenAI Chat Completions 格式的聊天服务
+- 语义检索需要兼容 OpenAI Embeddings 格式的向量服务；两种服务可以来自不同供应商
 
 ## 安装与构建
 
@@ -301,6 +304,17 @@ adl "今天解决了 SQLite 锁等待问题 #sqlite #database"
 
 ## 配置模型
 
+### 先理解两套服务
+
+项目把 AI 能力拆成两套可以独立配置的服务：
+
+| 服务 | 负责什么 | 哪些命令会使用 |
+| --- | --- | --- |
+| `chat` | 生成文字、摘要和标签 | `add --ai`、`semantic --explain`、`ask` 的最终回答 |
+| `embedding` | 把文本转换为向量 | `embed`、`semantic`、`ask` 的本地资料检索 |
+
+只使用普通增删改查和关键词搜索时，两套服务都不需要。只使用语义检索时只需配置 `embedding`；`ask` 需要同时配置两套服务，因为它要先检索，再生成回答。
+
 ### DeepSeek 首次配置向导
 
 使用 DeepSeek 时推荐直接运行：
@@ -322,7 +336,7 @@ API 地址：https://api.deepseek.com
 adl setup --skip-test
 ```
 
-官方 DeepSeek API 当前不提供 embedding 接口，因此该向导只配置笔记润色、摘要、标签和搜索结果解读使用的聊天模型。关键词搜索仍然可以正常使用；语义检索需要后续单独配置支持 embedding 的服务。
+`setup` 只配置聊天服务，不会修改已经保存的向量服务。要使用语义检索和知识问答，还需要按下一节单独配置一个兼容 OpenAI Embeddings 格式的服务。
 
 查看配置文件路径：
 
@@ -330,18 +344,26 @@ adl setup --skip-test
 ai-dev-logger config path
 ```
 
-推荐先通过环境变量提供 API Key，避免把密钥写进配置文件：
+### 分别配置聊天和向量服务
+
+推荐通过两个环境变量分别提供密钥，避免把密钥写进配置文件：
 
 ```powershell
-$env:AI_DEV_LOGGER_API_KEY="your-api-key"
+$env:AI_DEV_LOGGER_CHAT_API_KEY="your-chat-api-key"
+$env:AI_DEV_LOGGER_EMBEDDING_API_KEY="your-embedding-api-key"
 ```
 
 这条命令只对当前 PowerShell 窗口生效。需要长期保存到当前 Windows 用户时执行：
 
 ```powershell
 [Environment]::SetEnvironmentVariable(
-  "AI_DEV_LOGGER_API_KEY",
-  "your-api-key",
+  "AI_DEV_LOGGER_CHAT_API_KEY",
+  "your-chat-api-key",
+  "User"
+)
+[Environment]::SetEnvironmentVariable(
+  "AI_DEV_LOGGER_EMBEDDING_API_KEY",
+  "your-embedding-api-key",
   "User"
 )
 ```
@@ -350,18 +372,31 @@ $env:AI_DEV_LOGGER_API_KEY="your-api-key"
 
 ```powershell
 ai-dev-logger config set `
-  --base-url "https://api.openai.com/v1" `
-  --model "your-chat-model" `
+  --chat-base-url "https://your-chat-provider.example/v1" `
+  --chat-model "your-chat-model"
+
+ai-dev-logger config set `
+  --embedding-base-url "https://your-embedding-provider.example/v1" `
   --embedding-model "your-embedding-model"
 ```
 
-也可以使用 `config set --api-key "your-api-key"` 把密钥写入本地配置文件。程序读取密钥的优先级是：
+把示例地址和模型名称替换为供应商给出的实际值。两个服务可以使用同一家供应商，也可以分别使用不同供应商；前提是接口分别兼容 OpenAI Chat Completions 和 Embeddings 请求格式。
 
-1. `AI_DEV_LOGGER_API_KEY` 环境变量
-2. 配置文件中的 `api_key`
-3. `OPENAI_API_KEY` 环境变量
+也可以使用 `--chat-api-key` 和 `--embedding-api-key` 把密钥写入本地配置文件，但命令可能留在终端历史中：
 
-密钥值会去掉首尾空白；只有空格或换行的值视为未设置，继续查找下一个来源。环境变量只影响运行时使用的密钥，不会在修改模型时自动写入配置文件。
+```powershell
+adl config set --chat-api-key "your-chat-api-key"
+adl config set --embedding-api-key "your-embedding-api-key"
+```
+
+使用新式独立配置时，每套密钥的读取优先级是：
+
+1. 对应的专用环境变量：`AI_DEV_LOGGER_CHAT_API_KEY` 或 `AI_DEV_LOGGER_EMBEDDING_API_KEY`
+2. 配置文件中对应服务的 `api_key`
+3. 兼容旧版本的共享环境变量 `AI_DEV_LOGGER_API_KEY`
+4. `OPENAI_API_KEY` 环境变量
+
+旧版只有 `llm` 区块的配置仍可读取，其原有密钥优先级保持不变。密钥值会去掉首尾空白；只有空格或换行的值视为未设置。环境变量只影响运行时，不会在修改模型时被写回配置文件。
 
 查看当前配置：
 
@@ -371,22 +406,26 @@ ai-dev-logger config show
 
 `config show` 会显示当前生效的密钥来源，并默认隐藏 API Key 的中间部分。不要把包含真实密钥的配置文件提交到 Git 或发送给其他人。
 
-`config set` 只修改显式传入的字段。例如，只执行 `adl config set --model "your-chat-model"` 会保留已有密钥、API 地址和向量模型。需要清除某项可选配置时，可以传入空值：
+`config set` 只修改显式传入的字段。例如，只执行 `adl config set --chat-model "your-chat-model"` 会保留已有密钥、API 地址和向量配置。需要清除某项可选配置时，可以传入空值：
 
 ```powershell
 adl config set --embedding-model=
 ```
 
-`--api-key=` 和 `--model=` 同样可以清空对应字段，但 API 地址不允许设为空。配置文件不存在时，`config show` 只显示默认值，不创建文件；首次执行有效的 `config set` 才会创建配置。已有文件为零字节时也按默认配置处理。没有传入任何修改项、参数不合法或已有配置损坏（非空但无法解析）时，命令会报错，不覆盖原文件。本命令不验证 API 连接，保存后可执行 `adl doctor --online` 检查。
+`--chat-api-key=`、`--embedding-api-key=` 和模型参数都可以清空对应字段，但 API 地址不允许设为空。旧参数 `--api-key`、`--base-url`、`--model` 继续保留，用于兼容原有共享配置；新配置建议使用带 `chat-` 或 `embedding-` 前缀的参数。
+
+配置文件不存在时，`config show` 只显示默认值，不创建文件；首次执行有效的 `config set` 才会创建配置。已有文件为零字节时也按默认配置处理。没有传入任何修改项、参数不合法或已有配置损坏（非空但无法解析）时，命令会报错，不覆盖原文件。本命令不验证 API 连接，保存后可执行 `adl doctor --online` 检查。
 
 配置项用途：
 
 | 配置项 | 用途 |
 | --- | --- |
-| `api_key` | API 身份验证 |
-| `base_url` | OpenAI 兼容 API 的基础地址 |
-| `model` | 笔记润色和检索结果解读使用的聊天模型 |
-| `embedding_model` | 笔记向量化和语义检索使用的模型 |
+| `chat.api_key` | 聊天服务身份验证；更推荐使用专用环境变量 |
+| `chat.base_url` | 兼容 Chat Completions 的 API 基础地址 |
+| `chat.model` | 笔记润色、结果解读和知识问答使用的聊天模型 |
+| `embedding.api_key` | 向量服务身份验证；更推荐使用专用环境变量 |
+| `embedding.base_url` | 兼容 Embeddings 的 API 基础地址 |
+| `embedding.model` | 笔记和问题向量化使用的模型 |
 
 ## 运行环境自检
 
@@ -403,10 +442,10 @@ adl doctor
 | 能力 | 是否必需 | 就绪条件 |
 | --- | --- | --- |
 | `local notes`：本地笔记和关键词搜索 | 必需 | SQLite 数据库可正常打开 |
-| `AI enhancement`：AI 整理和检索结果解读 | 可选 | 本地数据库正常，且 API 地址、API Key 和聊天模型已配置 |
+| `AI enhancement`：AI 整理、结果解读和问答生成 | 可选 | 本地数据库正常，且聊天服务地址、API Key 和模型已配置 |
 | `semantic search`：笔记向量化和语义检索 | 可选 | 本地数据库正常，且 API 地址、API Key 和 embedding 模型已配置 |
 
-缺少 API Key 或模型时，对应能力显示 `not configured`，但本地记笔记仍可使用。只配置 DeepSeek 聊天功能时，向量模型未配置不会再导致整个自检失败；聊天和向量能力分别判断，单独使用语义检索不要求聊天模型，只有 `semantic --explain` 的 AI 解读需要它。
+缺少 API Key 或模型时，对应能力显示 `not configured`，但本地记笔记仍可使用。聊天和向量能力分别判断：单独使用语义检索不要求聊天模型，`semantic --explain` 需要两者，`ask` 也需要两者。
 
 检查状态含义：
 
@@ -681,6 +720,30 @@ ai-dev-logger semantic "如何保护并发访问的共享数据" `
 
 程序会先输出匹配笔记，再把笔记 ID、相似度、标题、标签、摘要和最佳命中片段交给聊天模型，生成 `AI explanation`。正文上下文只包含选中的片段，不发送整篇正文；模型会被要求使用 `[Note #ID]` 标注本地依据。该操作会比普通语义检索多调用一次聊天接口。
 
+## 根据知识库回答问题
+
+先为已有笔记建立向量索引：
+
+```powershell
+adl embed --all
+```
+
+然后用自然语言提问：
+
+```powershell
+adl ask "以前如何处理 SQLite 锁冲突？"
+adl ask "Go map 并发读写怎么处理？" --limit 3 --min-score 0.4
+```
+
+`ask` 是当前知识库的完整问答入口，执行顺序如下：
+
+1. 使用 embedding 服务把问题转换为向量。
+2. 在本地 SQLite 中比较已有片段向量，并按相似度选择资料。
+3. 只把选中的片段及其笔记信息发送给聊天服务。
+4. 输出来源列表和回答；回答必须使用 `[Note #ID]` 引用实际检索到的笔记。
+
+`--limit` 默认最多使用 5 条笔记，`--min-score` 默认是 `0.2`。如果没有达到阈值的资料，程序会直接提示没有足够相关的本地笔记，不调用聊天服务，也不会让模型脱离知识库自由猜测。笔记仍保存在本地；只有问题和本次命中的片段会发送给已配置的模型服务。
+
 ## 导出笔记
 
 导出成适合阅读、分享和打印的 Markdown：
@@ -841,29 +904,39 @@ ai-dev-logger `
 
 ## 常见问题
 
-### `llm api key is empty`
+### `chat API key is empty`
 
-配置 API Key：
+配置聊天服务 API Key：
 
 ```powershell
-$env:AI_DEV_LOGGER_API_KEY="your-api-key"
+$env:AI_DEV_LOGGER_CHAT_API_KEY="your-chat-api-key"
 ```
 
-也可以执行 `ai-dev-logger config set --api-key "your-api-key"` 保存到本地配置文件。
+也可以执行 `adl config set --chat-api-key "your-chat-api-key"` 保存到本地配置文件。
+
+### `embedding API key is empty`
+
+配置向量服务 API Key：
+
+```powershell
+$env:AI_DEV_LOGGER_EMBEDDING_API_KEY="your-embedding-api-key"
+```
+
+也可以执行 `adl config set --embedding-api-key "your-embedding-api-key"` 保存到本地配置文件。
 
 ### `status 429` 或临时 `status 5xx`
 
 程序会对限流和服务端临时故障自动重试 2 次，等待时间从 500 毫秒开始递增，单次最多等待 5 秒。如果 3 次请求仍然失败，命令会显示最终状态码和经过截断的错误内容。
 
-### `llm model is empty`
+### `chat model is empty`
 
 需要使用 `--ai` 或 `--explain` 时配置聊天模型：
 
 ```powershell
-ai-dev-logger config set --model "your-chat-model"
+ai-dev-logger config set --chat-model "your-chat-model"
 ```
 
-### `llm embedding model is empty`
+### `embedding model is empty`
 
 配置 embedding 模型：
 
@@ -913,7 +986,7 @@ ai-dev-logger embed --all
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check.ps1
 ```
 
-脚本会依次检查 Go 格式、依赖文件、单元测试、静态分析和构建，并在临时目录演练在线安装器、离线安装器、短命令、交互增删改查、命令帮助、配置读写与密钥脱敏、无 AI 配置的离线自检和 PowerShell 补全配置。交互验收检查命令不被误存、字段修改、删除取消与确认以及 ID 不复用。帮助验收会确认帮助页不创建数据库或配置目录；配置验收使用测试密钥，检查局部更新不会把环境变量写回文件，并验证清空向量模型的命令。测试文件保存在被 Git 忽略的 `.tmp\ci` 目录，不会修改真实用户 PATH 或 PowerShell 配置。
+脚本会依次检查 Go 格式、依赖文件、单元测试、静态分析和构建，并在临时目录演练在线安装器、离线安装器、短命令、交互增删改查、命令帮助、配置读写与密钥脱敏、无 AI 配置的离线自检和 PowerShell 补全配置。交互验收检查命令不被误存、字段修改、删除取消与确认以及 ID 不复用。帮助验收会覆盖 `ask`；配置验收同时覆盖旧版共享配置和新版独立聊天/向量配置，确保各自密钥不会相互覆盖。测试文件保存在被 Git 忽略的 `.tmp\ci` 目录，不会修改真实用户 PATH 或 PowerShell 配置。
 
 仓库中的 `.github/workflows/ci.yml` 会在每次 push、Pull Request 和手工触发时同时运行两条检查链路：Ubuntu 负责通用 Go 质量检查和 Windows 交叉编译，Windows 负责执行完整 `scripts/check.ps1`，真实运行 `.exe` 和两个安装器。测试使用本地临时 HTTP 服务，不需要把真实 API Key 配置到 GitHub Secrets。
 
@@ -976,6 +1049,7 @@ restore -i notes-backup.db --yes      自动备份当前库并执行恢复
 semantic <query>            语义检索
 semantic <query> --min-score 0.65  过滤低相似度结果
 semantic <query> --explain  语义检索并生成 AI 解读
+ask <question>              根据本地笔记回答并引用来源
 setup                       交互配置并测试 DeepSeek 聊天接口
 config path/show/set        管理配置
 version                     查看完整构建版本信息

@@ -55,6 +55,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", appconfig.DefaultPath(), "配置文件路径")
 
 	rootCmd.AddCommand(addCmd)
+	rootCmd.AddCommand(askCmd)
 	rootCmd.AddCommand(backupCmd)
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(configCmd)

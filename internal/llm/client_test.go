@@ -312,6 +312,33 @@ func TestRetryDelayUsesRetryAfterAndCap(t *testing.T) {
 	}
 }
 
+func TestValidateNoteCitationsOnlyAcceptsRetrievedNotes(t *testing.T) {
+	notes := []SearchNote{{ID: 7}, {ID: 12}}
+	tests := []struct {
+		name    string
+		answer  string
+		wantErr string
+	}{
+		{name: "valid", answer: "使用事务可以保持一致性。[Note #7]"},
+		{name: "missing", answer: "使用事务可以保持一致性。", wantErr: "contains no [Note #ID] citation"},
+		{name: "not retrieved", answer: "另一条记录给出了结论。[Note #99]", wantErr: "note #99, which was not retrieved"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateNoteCitations(test.answer, notes)
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("valid citation was rejected: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func clearAPIKeyEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv(appconfig.EnvAPIKey, "")
