@@ -123,7 +123,7 @@ func classifyInteractiveInput(line string) (string, string, bool) {
 	case "add", "list", "ls", "find", "search", "show", "update", "delete", "help", "exit", "quit", "q":
 		return command, argument, true
 	// Reserve CLI-only commands so they produce guidance instead of becoming notes.
-	case "ask", "backup", "completion", "config", "doctor", "embed", "export", "import", "restore", "semantic", "setup", "status", "version", "--version":
+	case "ask", "backup", "completion", "config", "doctor", "embed", "eval", "export", "import", "ingest", "restore", "semantic", "setup", "status", "version", "--version":
 		return command, argument, true
 	default:
 		return command, argument, explicit

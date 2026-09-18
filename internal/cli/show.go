@@ -43,6 +43,13 @@ var showCmd = &cobra.Command{
 
 		fmt.Printf("#%d  %s\n", note.ID, note.Title)
 		fmt.Printf("created: %s\n", note.CreatedAt.Format("2006-01-02 15:04"))
+		source, err := db.NoteSource(cmd.Context(), id)
+		if err != nil {
+			return err
+		}
+		if source != "" {
+			fmt.Printf("source: %s\n", source)
+		}
 		if len(note.Tags) > 0 {
 			fmt.Printf("tags: %s\n", strings.Join(note.Tags, ", "))
 		}

@@ -365,7 +365,19 @@ func buildSearchExplainPrompt(query string, notes []SearchNote) string {
 }
 
 func buildKnowledgeAnswerPrompt(question string, notes []SearchNote) string {
-	return "<question>\n" + question + "\n</question>\n\n<retrieved_notes>\n" + buildSearchExplainPrompt(question, notes) + "\n</retrieved_notes>\n\nAnswer using only the retrieved notes."
+	var context strings.Builder
+	for _, note := range notes {
+		context.WriteString(KnowledgeSourceText(note))
+	}
+	return "<question>\n" + question + "\n</question>\n\n<retrieved_notes>\n" + context.String() + "\n</retrieved_notes>\n\nAnswer using only the retrieved notes."
+}
+
+// KnowledgeSourceText is shared with retrieval so its character budget matches
+// the actual source text sent to the model, including bounded metadata.
+func KnowledgeSourceText(note SearchNote) string {
+	return fmt.Sprintf("\n[Note #%d]\nChunk: %d\nSimilarity: %.4f\nTitle: %s\nTags: %s\nSummary: %s\nBody: %s\n",
+		note.ID, note.Chunk, note.Score, truncateRunes(note.Title, 200),
+		truncateRunes(strings.Join(note.Tags, ", "), 300), truncateRunes(note.Summary, 500), truncateRunes(note.Body, 1200))
 }
 
 func validateNoteCitations(answer string, notes []SearchNote) error {

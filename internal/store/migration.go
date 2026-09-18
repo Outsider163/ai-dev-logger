@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const currentSchemaVersion = 2
+const currentSchemaVersion = 3
 
 type schemaMigration struct {
 	Version int
@@ -69,6 +69,13 @@ INSERT INTO note_embeddings(note_id,model,dimensions,vector_json,content_hash,cr
 SELECT note_id,model,dimensions,vector_json,content_hash,created_at,updated_at FROM legacy_note_embeddings;
 DROP TABLE legacy_note_embeddings;
 CREATE INDEX idx_note_embeddings_model ON note_embeddings(model);
+`},
+	{Version: 3, SQL: `
+CREATE TABLE note_sources (
+ path TEXT PRIMARY KEY,
+ note_id INTEGER NOT NULL UNIQUE REFERENCES notes(id) ON DELETE CASCADE,
+ body_hash TEXT NOT NULL
+);
 `},
 }
 

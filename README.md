@@ -600,7 +600,7 @@ adl show 6 --chunks
 
 在新版 `adl>` 中输入 `show 6 --chunks` 也可以。片段显示为 `[Note #6 / Chunk 1]`、`[Note #6 / Chunk 2]`；片段编号从 1 开始，仅表示当前笔记内的顺序，编辑后可能变化。查看和生成切片本身都不调用 AI。
 
-首次使用新版打开旧数据库时，会事务化迁移到 schema 2 并自动补齐切片，保留原笔记和旧向量。短笔记的有效旧向量可继续使用；长笔记的整篇向量会因内容哈希不匹配被跳过，运行 `adl embed --all` 即可重建。建议升级前用旧版 `adl backup -o before-chunks.db` 留一份备份；迁移后的数据库不能再由只支持 schema 1 的旧程序打开。当前安装包不会因源码改动自动升级，可在项目目录用 `go run . show 6 --chunks` 体验。
+首次使用新版打开旧数据库时，会事务化迁移到 schema 3；schema 2 增加切片，schema 3 增加文件来源关联。原笔记和旧向量会保留。短笔记的有效旧向量可继续使用；长笔记的整篇向量会因内容哈希不匹配被跳过，运行 `adl embed --all` 即可重建。建议升级前用旧版 `adl backup -o before-upgrade.db` 留一份备份；升级后的数据库不能再由只支持 schema 1 或 2 的旧程序打开。当前安装包不会因源码改动自动升级，可在项目目录用 `go run . show 6 --chunks` 体验。
 
 ### 按片段生成向量
 
@@ -722,6 +722,46 @@ ai-dev-logger semantic "如何保护并发访问的共享数据" `
 
 ## 根据知识库回答问题
 
+当前源码支持先从本地文件录入资料（尚未发布）：
+
+```powershell
+adl ingest "D:\notes\sqlite.md" "D:\project\main.go" --tag project --dry-run
+adl ingest "D:\notes\sqlite.md" "D:\project\main.go" --tag project
+```
+
+每个文件成为一条笔记，显式文件以文件名为标题，目录中的文件以相对于输入目录的路径为标题，正文保留原文（移除 UTF-8 BOM）。支持 UTF-8 文本、Markdown 和代码，不解析 PDF、Word 或其他二进制格式。每个文件最多 4 MiB，每批最多 256 个文件、合计 64 MiB。
+
+批量导入资料目录：
+
+```powershell
+adl ingest "D:\notes" --recursive --ext md,txt --dry-run
+adl ingest "D:\notes" --recursive --ext md,txt --tag knowledge
+```
+
+不加 `--recursive` 只读取目录当前层。预演会列出文件路径和对应笔记标题；同一个路径被多个输入选中时只处理一次，采用第一次选中时的标题。默认扫描 Markdown、文本和常见代码扩展名，完整列表见 `internal/cli/ingest_files.go`；`--ext` 替换目录扫描的扩展名列表，不限制显式指定的单个文件。目录遍历按文件名排序，错误和超出限制都会终止整批导入。
+
+自动扫描跳过点号开头的文件/目录，以及 `node_modules`、`vendor`、`dist`、`build`、`target`、`__pycache__`、`venv` 目录，不跟随符号链接；显式传入的符号链接也会报错。当前不会解析 `.gitignore`，这些筛选规则不等同于敏感信息检查；预演清单应以你实际想导入的资料为准。
+
+导入在本地完成并自动切片，不需要密钥。全部文件先校验，再在一个事务中保存；`--dry-run` 不保存笔记，但可能初始化或升级数据库。普通导入中，相同标题、正文、标签和摘要默认跳过，可用 `--on-duplicate error` 拒绝重复或 `allow` 允许重复。普通导入保存快照，文件修改后再次导入会新增笔记。需要更新同一笔记时使用下面的 `--sync` 模式。
+
+普通导入仅把文件名或相对路径保存在笔记标题中，换一个目录根路径导入可能改变标题，因而被视为新笔记。代码文件按原文存储，不会执行其中的代码。请先检查内容，再决定是否运行下面的向量化命令；向量化会将笔记片段发送给配置的向量服务。
+
+### 按来源同步文件
+
+```powershell
+adl ingest "D:\notes" --recursive --ext md,txt --sync --dry-run
+adl ingest "D:\notes" --recursive --ext md,txt --sync --tag knowledge
+adl embed --all
+```
+
+第一次使用 `--sync` 会创建笔记并关联规范化绝对路径；之后对同一路径继续使用 `--sync`，按正文哈希决定新增、更新或跳过，输出 `created`、`updated`、`unchanged` 数量。在 Windows 上来源路径不区分大小写。`adl show <id>` 会显示已关联的 `source` 路径。
+
+- 同步更新保留笔记 ID、创建时间、标题和标签，`--tag` 只用于本次新建的笔记。正文变化时清空摘要、删除旧向量并重建切片，之后需要 `embed --all`。
+- 无变化的文件保留已有向量。如果文件与笔记正文都相对上次同步发生了不同修改，整批同步报冲突并回滚。核对双方内容，将需要保留的正文合并到文件和笔记，使两者一致后重试。
+- `--sync` 不能与 `--on-duplicate` 一起使用。首次同步不会按相似内容接管旧笔记，即使之前普通导入过该文件，也会建立一条新的受跟踪笔记。
+- 同步由你执行命令触发，没有后台监听。文件删除或改名不会自动删除旧笔记；改名后的路径视为新来源。删除笔记会解除关联，下次同步同一路径会重新创建。
+- 绝对来源路径保存在本地数据库中，完整 SQLite 备份保留关联；当前 JSON/Markdown 导出不包含关联信息，JSON 导入后不会恢复同步关系。迁移到另一台电脑或移动文件后需重新建立关联。
+
 先为已有笔记建立向量索引：
 
 ```powershell
@@ -733,6 +773,7 @@ adl embed --all
 ```powershell
 adl ask "以前如何处理 SQLite 锁冲突？"
 adl ask "Go map 并发读写怎么处理？" --limit 3 --min-score 0.4
+adl ask "问题的原因和解决步骤分别是什么？" --limit 3 --chunks-per-note 3 --context-chars 12000
 ```
 
 `ask` 是当前知识库的完整问答入口，执行顺序如下：
@@ -742,7 +783,66 @@ adl ask "Go map 并发读写怎么处理？" --limit 3 --min-score 0.4
 3. 只把选中的片段及其笔记信息发送给聊天服务。
 4. 输出来源列表和回答；回答必须使用 `[Note #ID]` 引用实际检索到的笔记。
 
-`--limit` 默认最多使用 5 条笔记，`--min-score` 默认是 `0.2`。如果没有达到阈值的资料，程序会直接提示没有足够相关的本地笔记，不调用聊天服务，也不会让模型脱离知识库自由猜测。笔记仍保存在本地；只有问题和本次命中的片段会发送给已配置的模型服务。
+`--limit` 默认最多使用 5 条笔记（范围 1 到 20），`--min-score` 默认是 `0.2`。`ask` 默认每篇最多选取 2 个相关片段，可用 `--chunks-per-note` 调整为 1 到 5；设为 1 即恢复每篇只取最佳片段的行为。普通 `semantic` 的笔记去重行为保持不变。
+
+资料选择先按相似度为不同笔记各选一个片段，再为这些笔记补充其他高分片段。只有达到最低相似度的片段会被选择，来源列表逐一显示 `[Note #编号 / Chunk 片段号]`。回答仍以 `[Note #编号]` 引用笔记，片段号可以结合 `show <id> --chunks` 核对。
+
+`--context-chars` 是检索资料的 Unicode 字符预算，默认 12000，允许 2400 到 48000，包含实际发送的标题、标签、摘要、正文和来源格式；不包含问题、系统提示或模型回答，也不是 token 数。每段资料的标题保留前 200 字符、标签合计前 300、摘要前 500、正文前 1200；过长字段追加 `...` 截断标记，标记同样计入预算。装不下的片段会被跳过，实际使用的笔记或片段数可能少于参数上限。输出中的 `context` 会显示实际片段数和预算用量。
+
+如果没有达到阈值的资料，程序会提示没有足够相关的本地笔记，不调用聊天服务，也不生成答案。笔记仍保存在本地；问题和本次选中的片段及其笔记信息会发送给已配置的模型服务。引用检查能拒绝无引用或引用未检索笔记的回答，但不能保证每句话都被资料正确支持，重要结论仍需核对原文。
+
+### 只查看检索依据
+
+```powershell
+adl ask "数据库锁冲突的原因和解决方法是什么？" --retrieve-only
+adl ask "数据库锁冲突的原因和解决方法是什么？" --retrieve-only --chunks-per-note 3 --min-score 0.4
+```
+
+`--retrieve-only` 使用与正常 `ask` 相同的检索、阈值和上下文预算，输出来源列表、相似度、字符用量，以及 `Retrieved context` 下的实际资料文本。此模式不会调用聊天服务，也不需要聊天密钥；仍需配置向量服务和已有索引，问题向量化可能产生 API 用量。资料预览不会发送给聊天服务。
+
+排查回答质量时，先执行这个模式：
+
+1. 资料不在库中：用 `list`、`show` 核对导入结果，文件更新后执行 `ingest --sync`。
+2. 资料已入库但未被检索：用 `status` 检查索引，必要时执行 `embed --all`。
+3. 片段选择不完整：检查 `--min-score`、`--chunks-per-note` 和 `--context-chars`，调整后再次预览。降低阈值也可能引入无关资料。
+4. 预览已包含充分依据：去掉 `--retrieve-only` 生成回答，再逐项核对答案与原文；引用存在不代表答案一定正确。
+
+预览只包含当前选中的资料，不包括系统提示和模型输出。如果文件、模型和参数在两次执行间发生变化，预览与后续问答可能选中不同资料。
+
+## 检索质量评估
+
+准备 JSON 问题集，预期编号必须对应当前数据库中的真实笔记：
+
+```json
+[
+  {"question": "之前怎样处理数据库锁冲突？", "expected_note_ids": [1]},
+  {"question": "索引更新与备份分别怎么做？", "expected_note_ids": [4, 5]}
+]
+```
+
+```powershell
+adl eval --input cases.json --limit 3
+```
+
+`eval` 只调用向量服务，复用 `ask` 的相似度过滤、多片段选择和上下文预算。支持相同的 `--limit`、`--min-score`、`--chunks-per-note`、`--context-chars`。每题通常一次向量请求，临时失败可能重试；没有聊天请求。题目集最多 50 题、1 MiB，每题最多 20 个不重复的正整数笔记编号。无答案题使用 `"expected_note_ids": []`；不允许省略该字段或使用 null。
+
+有答案题计算命中率、平均召回率和 MRR；无答案题单独计算正确拒绝率（Abstention rate），仅当没有选出任何资料片段时算正确。这是检索层面的拒绝，不代表验证了聊天模型的拒答行为。没有某类题目时，对应指标在文本中显示 N/A，在 JSON 中为 null，不会伪装成满分或零分。
+
+输出每题的预期编号、实际检索编号及三项指标：`Hit rate` 是至少命中一个预期笔记的问题比例，`Mean recall` 是每题预期笔记召回比例的平均值，`MRR` 是每题首个正确笔记排名倒数的平均值。多个片段按笔记去重；没有命中的题记 0。评分针对经过上下文预算筛选后实际用于问答的笔记，不能代表最终答案正确率。默认不因低分返回失败；非法题目、缺失预期笔记或 API 故障会报错，不输出不完整的总分。
+
+为自动回归检查设置质量门槛，并输出结构化报告：
+
+```powershell
+adl eval --input cases.json --limit 3 --format json --min-hit-rate 0.8 --min-recall 0.8 --min-mrr 0.7
+```
+
+四个最低指标参数均在 0 到 1 之间，默认 0。`--min-abstention-rate` 设置无答案题正确拒绝率的下限。设置非零门槛时，题目集必须包含对应题型，否则在调用 API 前报错。任何指标低于门槛时，程序先输出完整报告，再返回非零退出码；等于门槛算通过。比较使用原始浮点分数，文本显示的四位小数仅供阅读，例如实际 `2/3` 低于 `0.6667`。示例门槛不代表通用标准，应根据固定评估集上的实际基线设定。
+
+`--format json` 在标准输出仅生成 JSON，错误和警告在标准错误。报告 schema_version 为 2，包含 embedding_model、settings、case_count、answerable_case_count、unanswerable_case_count、cases、metrics、thresholds、passed 和 failures。每题的 no_answer_expected 表示是否预期无答案，abstained 表示实际是否未选出资料；没有命中的 retrieved_note_ids 是空数组。可用 PowerShell 的 `Out-File -Encoding utf8` 保存报告，保留 `$LASTEXITCODE` 判断成功；不要将标准错误合并进 JSON。报告包含问题文本和笔记编号，不包含模型密钥、笔记正文或 API 地址。
+
+使用 `adl eval compare before.json after.json` 本地比较两份版本 2 报告，显示模型、参数、四项指标差值和检索结果变化；召回率或首个正确结果排名下降、无答案题从正确拒绝变为误匹配时，标记 REGRESSION。要求问题及顺序一致，预期编号集合一致（集合内顺序可不同）。不调用 API、不打开数据库，每份文件最多 2 MiB。指标下降只展示，不导致非零退出码；输入无效会返回失败。报告不含数据库快照或供应商地址，无法验证底层资料和服务是否一致，应自行控制实验条件。
+
+仓库提供可复现的 [五题示例](examples/evaluation/README.md)。它使用独立临时数据库，避免示例编号与个人笔记混淆。比较参数时固定题目集、笔记内容和向量模型；不要在只有五篇笔记的示例里把 `--limit 5` 的高命中率当作检索能力提升。
 
 ## 导出笔记
 
@@ -1050,6 +1150,10 @@ semantic <query>            语义检索
 semantic <query> --min-score 0.65  过滤低相似度结果
 semantic <query> --explain  语义检索并生成 AI 解读
 ask <question>              根据本地笔记回答并引用来源
+ask <question> --retrieve-only  仅检查检索资料，不调用聊天服务
+eval --input cases.json       评估检索命中率、平均召回率和 MRR
+ingest <path> [path...]      将 UTF-8 文件或目录导入笔记并自动切片
+ingest <directory> -r --dry-run  递归扫描并预演文件导入
 setup                       交互配置并测试 DeepSeek 聊天接口
 config path/show/set        管理配置
 version                     查看完整构建版本信息

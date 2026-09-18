@@ -92,7 +92,7 @@ func TestRunAskUsesSeparateProvidersAndCitesSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output, errors bytes.Buffer
-	err = runAsk(ctx, askOptions{ConfigPath: configPath, DBPath: dbPath, Question: "之前如何处理数据库锁？", Limit: 3, MinScore: 0.5, Output: &output, Error: &errors})
+	err = runAsk(ctx, askOptions{ConfigPath: configPath, DBPath: dbPath, Question: "之前如何处理数据库锁？", Limit: 3, MinScore: 0.5, Output: &output, Error: &errors, ChunksPerNote: 2, ContextChars: 12000})
 	if err != nil {
 		t.Fatalf("runAsk: %v\n%s", err, errors.String())
 	}
@@ -137,7 +137,7 @@ func TestRunAskSkipsChatWhenNothingMatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output, errors bytes.Buffer
-	if err := runAsk(ctx, askOptions{ConfigPath: configPath, DBPath: dbPath, Question: "question", Limit: 3, MinScore: 0.5, Output: &output, Error: &errors}); err != nil {
+	if err := runAsk(ctx, askOptions{ConfigPath: configPath, DBPath: dbPath, Question: "question", Limit: 3, MinScore: 0.5, Output: &output, Error: &errors, ChunksPerNote: 2, ContextChars: 12000}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "未生成 AI 回答") || chatRequests.Load() != 0 {
@@ -172,7 +172,7 @@ func TestRunAskRejectsAnswerWithoutValidCitation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output, errors bytes.Buffer
-	err = runAsk(ctx, askOptions{ConfigPath: configPath, DBPath: dbPath, Question: "question", Limit: 1, MinScore: 0, Output: &output, Error: &errors})
+	err = runAsk(ctx, askOptions{ConfigPath: configPath, DBPath: dbPath, Question: "question", Limit: 1, MinScore: 0, Output: &output, Error: &errors, ChunksPerNote: 2, ContextChars: 12000})
 	if err == nil || !strings.Contains(err.Error(), "contains no [Note #ID] citation") {
 		t.Fatalf("expected citation failure, got %v", err)
 	}

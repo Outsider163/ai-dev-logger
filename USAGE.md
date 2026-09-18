@@ -306,6 +306,25 @@ adl doctor --online
 
 ### 8.2 为笔记建立索引
 
+已有 Markdown、文本或代码文件时，可以先在 PowerShell 导入。当前源码可把下面的 `adl` 换成 `go run .`：
+
+```powershell
+adl ingest "D:\notes\sqlite.md" "D:\project\main.go" --tag project --dry-run
+adl ingest "D:\notes\sqlite.md" "D:\project\main.go" --tag project
+adl list
+```
+
+先预演，再正式保存；每个文件是一条笔记，文件名是标题。文件需为 UTF-8，每个最多 4 MiB；暂不支持 PDF、Word。导入本身不调用模型。普通导入遇到相同标题、正文和标签时跳过，修改过的文件会保存为新笔记。需要保持同一编号时使用下面的 `--sync`。`ingest` 请在系统终端执行，工具内部 `adl>` 需先输入 `exit`。
+
+也可以一次导入整个资料目录：
+
+```powershell
+adl ingest "D:\notes" --recursive --ext md,txt --dry-run
+adl ingest "D:\notes" --recursive --ext md,txt --tag knowledge
+```
+
+第一条命令会列出将要读取的文件及笔记标题，核对后再执行第二条。`--recursive` 表示包含子目录，`--ext md,txt` 表示只选 Markdown 和文本。目录导入用相对路径做标题，例如 `go/map.md`。默认跳过点号开头的项、常见依赖/构建目录和符号链接；不读取 `.gitignore` 规则。每批最多 256 个文件、合计 64 MiB，可分目录导入。文件夹没有符合条件的文件时会报错。
+
 ```powershell
 adl embed --all
 adl status
@@ -313,26 +332,81 @@ adl status
 
 `embed --all` 会读取每条笔记的自动切片，调用向量服务，并把返回的向量保存在本地 SQLite 中。`status` 中 `notes with current embeddings` 等于笔记总数时，说明当前模型下的索引已经完整。新增笔记时也可以使用 `adl add --embed ...` 立即建立索引。
 
-### 8.3 向自己的笔记提问
+### 8.3 文件修改后同步更新
+
+第一次就使用 `--sync` 建立文件关联，以后修改文件后执行相同命令：
+
+```powershell
+adl ingest "D:\notes" --recursive --ext md,txt --sync --dry-run
+adl ingest "D:\notes" --recursive --ext md,txt --sync --tag knowledge
+adl embed --all
+```
+
+预演显示预计新增、更新和未变化数量；正式同步保留原笔记编号。已有笔记的标题和标签不会被同步参数改写，正文更新会清空旧摘要和向量，再执行 `embed --all` 恢复检索。
+
+如果同时用 `update` 改过笔记正文，又改了原文件，可能出现 `sync conflict`。用 `show 编号` 对照原文件，把需要保留的内容合并到双方，再重新同步；报冲突时整批不会部分保存。文件没有变化时，笔记中的手工修改会保留。
+
+普通导入的旧笔记没有来源关联，第一次 `--sync` 会新建受跟踪笔记，不会猜测并覆盖旧笔记。同步需要手动执行，没有后台监控；文件改名或删除不会删除知识库中的旧笔记。来源路径可用系统终端的 `adl show 编号` 查看。升级会将数据库迁移到 schema 3，旧程序不能打开升级后的库，请提前备份。
+
+### 8.4 向自己的笔记提问
 
 ```powershell
 adl ask "以前如何处理 SQLite 锁冲突？"
 adl ask "Go map 并发读写怎么处理？" --limit 3 --min-score 0.4
+adl ask "问题的原因和解决办法是什么？" --limit 3 --chunks-per-note 3 --context-chars 12000
 ```
 
 输出先列出 `Sources`，再显示 `Answer`。答案中的 `[Note #编号]` 对应真实命中的本地笔记，可继续执行 `adl show 编号` 查看完整原文。`--limit` 控制最多提供几条笔记，`--min-score` 控制最低相似度；阈值越高，资料通常越严格，但也越可能找不到结果。
 
-### 8.4 这条链路内部做了什么
+一篇长笔记的答案依据可能分布在多段里。`ask` 默认每篇最多取 2 个相关片段；`--chunks-per-note 3` 将上限改为 3。`--context-chars 12000` 限制本次发送的检索资料字符数（包含片段标题、标签和摘要，不包含问题或系统提示），它不是 token 数或费用上限。预算不够时会少选片段，`Sources` 中的 `context` 行会显示实际用量。需要核对片段时执行 `adl show 编号 --chunks`。
+
+### 8.5 这条链路内部做了什么
+
+想亲眼看到模型回答前拿到了什么资料，可以先运行：
+
+```powershell
+adl ask "问题的原因和解决办法是什么？" --retrieve-only
+```
+
+`Sources` 列出笔记编号、片段编号和相似度，`context` 显示字符预算用量，`Retrieved context` 展示选中片段的标题、标签、摘要和正文预览。这些资料文本与正常问答使用的格式一致。该命令只调用向量服务，不调用聊天服务，因此不需要聊天密钥，但仍可能产生向量接口费用。
+
+先核对资料是否足够回答问题。缺少笔记时补充导入；索引过期时执行 `adl embed --all`；遗漏其他相关片段时尝试增加 `--chunks-per-note` 或调整 `--min-score`。核对后使用相同问题和参数，去掉 `--retrieve-only` 生成答案。
 
 1. 问题被向量服务转换为一组数字。
 2. 程序在本地比较问题向量和笔记片段向量。
-3. 同一笔记只保留最相关片段，再选择得分最高的几条笔记。
+3. 先为不同笔记选择最佳片段，再在每篇片段上限和总字符预算内补充其他相关片段。
 4. 程序把问题和这些片段发给聊天服务，要求它只依据资料回答并引用笔记编号。
 5. 如果没有片段达到阈值，程序不会调用聊天服务，也不会凭空生成答案。
 
 原始数据库、未命中的笔记和全部向量不会上传；模型服务只会收到当前问题和本次选中的片段。调用外部服务仍可能产生费用，敏感内容应根据供应商的数据政策决定是否使用。
 
-## 9. 常见问题
+## 9. 用已知问题验收检索质量
+
+可以按 [五题检索验收](examples/evaluation/README.md) 从零建立一个独立示例库，观察查询和笔记之间的匹配。
+
+自己的资料也可以建立 cases.json：每题写 question，以及你人工确认能提供依据的 expected_note_ids 数组。先用 `adl list` 和 `adl show 编号` 核对编号，再执行：
+
+```powershell
+adl eval --input cases.json --limit 3
+```
+
+命中率表示有没有找到正确笔记；平均召回率表示预期笔记找全了多少；MRR 表示第一个正确笔记排得是否靠前。该命令调用向量接口，不调用聊天接口，所以它评估检索效果，不评估模型最终回答的正确性。把未命中的问题拿去执行 `ask --retrieve-only`，就能看到实际选中了什么。
+
+需要自动检查是否达标时，可以设置门槛并输出 JSON：
+
+```powershell
+adl eval --input cases.json --limit 3 --format json --min-hit-rate 0.8 --min-mrr 0.7
+```
+
+低于任一门槛时，报告仍会完整输出，但命令返回非零退出码；报告中的 `passed` 和 `failures` 表示是否达标及原因。`--min-recall` 可设置平均召回率下限。门槛需要根据你的实际评估基线决定，示例数字不是固定标准。保存报告和查看退出码的完整步骤见五题验收文档。
+
+也要测试知识库没有答案的问题：给这类题目填写 `"expected_note_ids": []`，不要省略字段或写 null。报告会单独统计 `Abstention rate`：无答案题中，没有检索出任何资料的比例。用 `--min-abstention-rate 0.8` 可以设置验收门槛；设置非零门槛必须包含无答案题。有答案题的三个指标不会混入无答案题，没有对应题型的指标显示 N/A（JSON 为 null，报告版本为 2）。注意，这不评估聊天模型是否会编造答案。
+
+公开的七题混合集在 `examples/evaluation/cases-with-no-answer.json`，使用方法见同目录 README。提高 `--min-score` 可能减少错误匹配，也可能漏掉正确资料，需要同时观察命中率和正确拒绝率。
+
+保存调整前后的 JSON 报告后，用 `adl eval compare before.json after.json` 对比。它不调用模型、不修改数据库，会展示指标差值与退步题目。仅支持版本 2 报告，要求问题顺序和预期编号集合一致；退步只展示，输入错误才返回失败。资料内容是否相同仍需自行确认，具体操作见评估示例文档。
+
+## 10. 常见问题
 
 ### 如何查看笔记切片
 

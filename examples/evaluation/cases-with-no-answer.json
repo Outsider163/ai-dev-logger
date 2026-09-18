@@ -1,0 +1,9 @@
+[
+  {"question": "数据库写入被长事务锁住时，当时怎样解决？", "expected_note_ids": [1]},
+  {"question": "Go 的 map 写入前和并发访问时要注意什么？", "expected_note_ids": [2]},
+  {"question": "如何让 HTTP 请求在调用者取消或超时后停止？", "expected_note_ids": [3]},
+  {"question": "文件同步后，如何让知识库检索到更新的内容？", "expected_note_ids": [4]},
+  {"question": "升级数据库之前怎样保留向量和文件来源关系？", "expected_note_ids": [5]},
+  {"question": "公司报销餐费的每日上限是多少？", "expected_note_ids": []},
+  {"question": "团队下周出游集合的时间和地点是什么？", "expected_note_ids": []}
+]

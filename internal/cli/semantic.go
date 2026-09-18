@@ -156,6 +156,19 @@ func selectCurrentSemanticCandidates(candidates []store.EmbeddedNote) ([]store.E
 }
 
 func rankSemanticMatches(queryVector []float64, candidates []store.EmbeddedNote, minScore float64) ([]semanticMatch, []skippedSemanticMatch) {
+	matches, skipped := rankSemanticChunks(queryVector, candidates, minScore)
+	unique := make([]semanticMatch, 0, len(matches))
+	seen := make(map[int64]bool)
+	for _, match := range matches {
+		if !seen[match.note.ID] {
+			unique = append(unique, match)
+			seen[match.note.ID] = true
+		}
+	}
+	return unique, skipped
+}
+
+func rankSemanticChunks(queryVector []float64, candidates []store.EmbeddedNote, minScore float64) ([]semanticMatch, []skippedSemanticMatch) {
 	matches := make([]semanticMatch, 0, len(candidates))
 	var skipped []skippedSemanticMatch
 	for _, candidate := range candidates {
@@ -179,13 +192,5 @@ func rankSemanticMatches(queryVector []float64, candidates []store.EmbeddedNote,
 		}
 		return matches[i].score > matches[j].score
 	})
-	unique := make([]semanticMatch, 0, len(matches))
-	seen := make(map[int64]bool)
-	for _, match := range matches {
-		if !seen[match.note.ID] {
-			unique = append(unique, match)
-			seen[match.note.ID] = true
-		}
-	}
-	return unique, skipped
+	return matches, skipped
 }
